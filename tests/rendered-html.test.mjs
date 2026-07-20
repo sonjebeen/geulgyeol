@@ -29,3 +29,29 @@ test("server-renders the GeulGyeol handwriting coach", async () => {
   assert.match(html, /Apple Pencil/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
+
+test("keeps coaching available when an OpenAI key is not configured", async () => {
+  const fallback = {
+    keep: "안정적인 흐름은 유지하세요.",
+    fix: "크기를 일정하게 맞춰 보세요.",
+    reason: "높이가 달라지면 문장이 흔들려 보여요.",
+    tip: "가이드 선에 글자 높이를 맞춰 보세요.",
+    exercise: ["마음", "기록", "하루"],
+    encouragement: "한 가지만 연습해도 충분해요.",
+    characterTarget: "",
+    characterFinding: "",
+    characterEvidence: "",
+    characterConfidence: "low",
+  };
+  const response = await render(
+    new Request("http://localhost/api/analyze", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "오늘의 마음을 기록합니다.", summary: {}, fallback }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.mode, "local");
+  assert.deepEqual(result.feedback, fallback);
+});

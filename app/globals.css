@@ -172,6 +172,22 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .one-thing { display: inline-block; margin: -55px 0 26px auto; float: right; transform: rotate(3deg); background: var(--yellow); padding: 8px 11px; font-size: 10px; font-weight: 900; box-shadow: 3px 4px 0 rgba(23, 35, 59, 0.08); }
 .coaching-card h2 { clear: both; margin: 7px 0 14px; font-size: clamp(23px, 2.5vw, 30px); line-height: 1.38; letter-spacing: -0.052em; word-break: keep-all; }
 .reason { margin: 0 0 23px; color: var(--muted); font-size: 12px; line-height: 1.75; }
+.character-insight-card { margin: 0 0 18px; padding: 16px; border: 1px solid rgba(237, 115, 95, 0.32); border-radius: 15px; background: #fff4f0; }
+.character-insight-topline { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 13px; }
+.character-insight-topline > span { color: #a65245; font-size: 9px; font-weight: 900; letter-spacing: 0.03em; }
+.confidence { padding: 5px 7px; border-radius: 99px; background: #efeae1; color: var(--muted); font-size: 8px; }
+.confidence.high { background: #cae4d7; color: #2d7252; }
+.confidence.medium { background: #f4df9e; color: #826412; }
+.character-insight-body { display: grid; grid-template-columns: 64px 1fr; gap: 13px; align-items: center; }
+.character-insight-body > strong { min-height: 64px; display: grid; place-items: center; border-radius: 14px; background: var(--card); color: var(--coral); font-size: 29px; letter-spacing: -0.08em; box-shadow: inset 0 0 0 1px rgba(237, 115, 95, 0.2); }
+.character-insight-body h3 { margin: 0 0 5px; font-size: 13px; line-height: 1.45; letter-spacing: -0.035em; word-break: keep-all; }
+.character-insight-body p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; word-break: keep-all; }
+.character-insight-card.pending, .character-insight-card.uncertain { display: grid; grid-template-columns: 37px 1fr; gap: 11px; align-items: center; border-color: rgba(90, 169, 133, 0.26); background: #f0f5f2; }
+.character-insight-card.uncertain { border-color: var(--line); background: #f5f2eb; }
+.vision-mark { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 12px; background: #cae4d7; color: #2d7252; font-size: 9px; font-weight: 950; }
+.uncertain .vision-mark { background: #e6e1d7; color: var(--muted); font-size: 16px; }
+.character-insight-card.pending strong, .character-insight-card.uncertain strong { font-size: 11px; }
+.character-insight-card.pending p, .character-insight-card.uncertain p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .coach-tip { display: grid; grid-template-columns: 33px 1fr; gap: 12px; padding: 17px; background: #edf4f0; border-radius: 14px; }
 .coach-tip > span { width: 31px; height: 31px; display: grid; place-items: center; background: #bddcca; border-radius: 50%; color: #31674b; font-weight: 900; font-size: 10px; }
 .coach-tip strong { font-size: 12px; }

@@ -68,6 +68,10 @@ type Feedback = {
   tip: string;
   exercise: string[];
   encouragement: string;
+  characterTarget: string;
+  characterFinding: string;
+  characterEvidence: string;
+  characterConfidence: "high" | "medium" | "low";
 };
 
 const PROMPTS = [
@@ -255,6 +259,10 @@ function buildFallbackFeedback(summary: AnalysisSummary): Feedback {
     tip: copy.tip,
     exercise: copy.exercise,
     encouragement: "전부 바꾸지 않아도 괜찮아요. 오늘은 이 한 가지만 맞춰 봐요.",
+    characterTarget: "",
+    characterFinding: "",
+    characterEvidence: "",
+    characterConfidence: "low",
   };
 }
 
@@ -290,6 +298,55 @@ function drawStroke(
   }
   ctx.stroke();
   ctx.restore();
+}
+
+function renderAnalysisSheet(samples: Sample[]) {
+  const canvas = document.createElement("canvas");
+  const width = 1280;
+  const height = 900;
+  const bandHeight = 280;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.fillStyle = "#fffefa";
+  ctx.fillRect(0, 0, width, height);
+  ctx.font = "700 24px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  samples.slice(0, 3).forEach((sample, index) => {
+    const top = index * 300;
+    ctx.fillStyle = index % 2 === 0 ? "#fffefa" : "#faf7f0";
+    ctx.fillRect(0, top, width, 300);
+    ctx.strokeStyle = "rgba(69, 98, 134, 0.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(70, top + 205);
+    ctx.lineTo(width - 35, top + 205);
+    ctx.stroke();
+
+    ctx.fillStyle = OVERLAY_COLORS[index];
+    ctx.beginPath();
+    ctx.arc(35, top + 150, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(String(index + 1), 35, top + 151);
+
+    ctx.save();
+    ctx.translate(70, top + 20);
+    sample.strokes.forEach((stroke) =>
+      drawStroke(ctx, stroke, width - 110, bandHeight - 35, {
+        color: "#17233b",
+        alpha: 1,
+        lineWidth: stroke.pointerType === "pen" ? 4.5 : 5.5,
+      }),
+    );
+    ctx.restore();
+  });
+
+  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 function findVarianceHotspot(samples: Sample[]) {
@@ -615,10 +672,11 @@ export default function Home() {
 
     const startedAt = Date.now();
     try {
+      const analysisImage = renderAnalysisSheet(nextSamples);
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, summary: nextSummary, fallback }),
+        body: JSON.stringify({ prompt, summary: nextSummary, fallback, analysisImage }),
       });
       if (response.ok) {
         const result = (await response.json()) as { mode?: "ai" | "local"; feedback?: Feedback };
@@ -766,7 +824,7 @@ export default function Home() {
 
           <div className="privacy-note">
             <span>✓</span>
-            원본 획 데이터는 이 기기 안에서 분석하며 서버에 저장하지 않아요.
+            원본 획은 저장하지 않으며, AI 연결 시 축소된 비교 이미지와 요약값만 분석해요.
           </div>
         </section>
       )}
@@ -849,7 +907,7 @@ export default function Home() {
           <div className="workspace-card score-card">
             <div className="result-topline">
               <p className="section-kicker">YOUR HANDWRITING RHYTHM</p>
-              <span className="analysis-badge">{analysisMode === "ai" ? "GPT-5.6 코칭" : "기기 내 코칭"}</span>
+              <span className="analysis-badge">{analysisMode === "ai" ? "GPT-5.6 비전 코칭" : "기기 내 코칭"}</span>
             </div>
             <div className="score-row">
               <div className="score-ring" style={{ "--score": afterScore ?? summary.consistency } as React.CSSProperties}>
@@ -936,6 +994,33 @@ export default function Home() {
             <p className="section-kicker">FOCUS · {summary.focusLabel}</p>
             <h2>{feedback.fix}</h2>
             <p className="reason">{feedback.reason}</p>
+            {analysisMode === "ai" && feedback.characterTarget ? (
+              <div className="character-insight-card">
+                <div className="character-insight-topline">
+                  <span>AI가 찾은 문제 글자</span>
+                  <b className={`confidence ${feedback.characterConfidence}`}>
+                    확신도 {feedback.characterConfidence === "high" ? "높음" : feedback.characterConfidence === "medium" ? "보통" : "낮음"}
+                  </b>
+                </div>
+                <div className="character-insight-body">
+                  <strong>{feedback.characterTarget}</strong>
+                  <div>
+                    <h3>{feedback.characterFinding}</h3>
+                    <p>{feedback.characterEvidence}</p>
+                  </div>
+                </div>
+              </div>
+            ) : analysisMode === "ai" ? (
+              <div className="character-insight-card uncertain">
+                <span className="vision-mark" aria-hidden="true">◎</span>
+                <div><strong>특정 글자를 억지로 고르지 않았어요</strong><p>이미지만으로 확신하기 어려워 전체 움직임 수치를 기준으로 코칭했어요.</p></div>
+              </div>
+            ) : (
+              <div className="character-insight-card pending">
+                <span className="vision-mark" aria-hidden="true">AI</span>
+                <div><strong>문제 글자 직접 지목 준비 완료</strong><p>GPT-5.6 API를 연결하면 세 글씨를 보고 가장 불안정한 글자와 근거를 표시해요.</p></div>
+              </div>
+            )}
             <div className="coach-tip">
               <span>01</span>
               <div><strong>이렇게 연습해 보세요</strong><p>{feedback.tip}</p></div>
