@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(request = new Request("http://localhost/", { headers: { accept: "text/html" } })) {
@@ -54,4 +55,12 @@ test("keeps coaching available when an OpenAI key is not configured", async () =
   const result = await response.json();
   assert.equal(result.mode, "local");
   assert.deepEqual(result.feedback, fallback);
+});
+
+test("includes focused character practice and motion heatmap controls", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /한 글자 집중 연습실/);
+  assert.match(source, /속도 히트맵 분석하기/);
+  assert.match(source, /획순 재생/);
+  assert.match(source, /drawSpeedHeatmap/);
 });

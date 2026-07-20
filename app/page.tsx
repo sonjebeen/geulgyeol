@@ -514,6 +514,167 @@ function StrokeOverlay({ samples, focusLabel, variation }: { samples: Sample[]; 
   );
 }
 
+function getHangulCharacters(prompt: string, preferred?: string) {
+  const preferredCharacter = Array.from(preferred ?? "").find((character) => /[가-힣]/.test(character));
+  const characters = Array.from(prompt).filter((character) => /[가-힣]/.test(character));
+  return Array.from(new Set([...(preferredCharacter ? [preferredCharacter] : []), ...characters])).slice(0, 18);
+}
+
+function drawSpeedHeatmap(
+  ctx: CanvasRenderingContext2D,
+  sample: Sample,
+  width: number,
+  height: number,
+  progress: number,
+) {
+  const segments = sample.strokes.flatMap((stroke) =>
+    stroke.points.slice(1).map((point, index) => {
+      const previous = stroke.points[index];
+      const elapsed = Math.max(point.t - previous.t, 1);
+      return pointDistance(previous, point) / elapsed;
+    }),
+  );
+  const sorted = [...segments].sort((a, b) => a - b);
+  const low = sorted[Math.floor(sorted.length * 0.12)] ?? 0;
+  const high = sorted[Math.floor(sorted.length * 0.88)] ?? Math.max(...segments, 0.001);
+  const totalPoints = sample.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
+  let remaining = Math.max(1, Math.floor(totalPoints * progress));
+
+  sample.strokes.forEach((stroke, strokeIndex) => {
+    if (remaining <= 0 || !stroke.points.length) return;
+    const visibleCount = Math.min(stroke.points.length, remaining);
+    const visiblePoints = stroke.points.slice(0, visibleCount);
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = stroke.pointerType === "pen" ? 5.5 : 7;
+    for (let index = 1; index < visiblePoints.length; index += 1) {
+      const previous = visiblePoints[index - 1];
+      const point = visiblePoints[index];
+      const elapsed = Math.max(point.t - previous.t, 1);
+      const speed = pointDistance(previous, point) / elapsed;
+      const normalized = clamp((speed - low) / Math.max(high - low, 0.00001), 0, 1);
+      const hue = 210 - normalized * 202;
+      ctx.strokeStyle = `hsl(${hue} 76% 48%)`;
+      ctx.beginPath();
+      ctx.moveTo(previous.x * width, previous.y * height);
+      ctx.lineTo(point.x * width, point.y * height);
+      ctx.stroke();
+    }
+
+    if (visiblePoints.length) {
+      const first = visiblePoints[0];
+      const x = first.x * width;
+      const y = first.y * height;
+      ctx.fillStyle = "#fffefa";
+      ctx.strokeStyle = "#17233b";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#17233b";
+      ctx.font = "800 10px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(strokeIndex + 1), x, y + 0.5);
+    }
+    ctx.restore();
+    remaining -= stroke.points.length;
+  });
+}
+
+function CharacterHeatmap({ samples, character }: { samples: Sample[]; character: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, samples.length - 1));
+  const [progress, setProgress] = useState(1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const sample = samples[activeIndex] ?? samples[0];
+
+  const renderFrame = useCallback(
+    (frameProgress: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !sample) return;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.scale(ratio, ratio);
+      drawSpeedHeatmap(ctx, sample, rect.width, rect.height, frameProgress);
+    },
+    [sample],
+  );
+
+  useEffect(() => {
+    renderFrame(progress);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => renderFrame(progress));
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [progress, renderFrame]);
+
+  useEffect(
+    () => () => {
+      if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    },
+    [],
+  );
+
+  const selectSample = (index: number) => {
+    if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    setIsPlaying(false);
+    setProgress(1);
+    setActiveIndex(index);
+  };
+
+  const replay = () => {
+    if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    const startedAt = performance.now();
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 500 : 2200;
+    setIsPlaying(true);
+    setProgress(0);
+    const tick = (now: number) => {
+      const nextProgress = clamp((now - startedAt) / duration, 0, 1);
+      setProgress(nextProgress);
+      if (nextProgress < 1) {
+        animationRef.current = window.requestAnimationFrame(tick);
+      } else {
+        animationRef.current = null;
+        setIsPlaying(false);
+      }
+    };
+    animationRef.current = window.requestAnimationFrame(tick);
+  };
+
+  return (
+    <div className="heatmap-panel">
+      <div className="heatmap-toolbar">
+        <div className="sample-tabs" aria-label={`${character} 필기 선택`}>
+          {samples.map((_, index) => (
+            <button className={activeIndex === index ? "active" : ""} type="button" onClick={() => selectSample(index)} key={index}>
+              {index + 1}번째
+            </button>
+          ))}
+        </div>
+        <button className="replay-button" type="button" onClick={replay} disabled={isPlaying}>
+          <span aria-hidden="true">{isPlaying ? "•••" : "▶"}</span>{isPlaying ? "재생 중" : "획순 재생"}
+        </button>
+      </div>
+      <div className="heatmap-paper">
+        <span className="character-watermark" aria-hidden="true">{character}</span>
+        <canvas ref={canvasRef} aria-label={`${character} 속도 히트맵과 획순`} />
+      </div>
+      <div className="speed-legend">
+        <span>천천히</span><i /><span>빠르게</span><b>원 안의 숫자는 획의 시작 순서예요</b>
+      </div>
+    </div>
+  );
+}
+
 function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -546,20 +707,36 @@ export default function Home() {
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [samples, setSamples] = useState<Sample[]>([]);
   const [prompt, setPrompt] = useState(PROMPTS[0]);
-  const [phase, setPhase] = useState<"write" | "analyzing" | "result" | "practice">("write");
+  const [phase, setPhase] = useState<
+    "write" | "analyzing" | "result" | "practice" | "character-practice" | "character-result"
+  >("write");
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [analysisMode, setAnalysisMode] = useState<"ai" | "local">("local");
   const [inputMode, setInputMode] = useState<"touch" | "pen" | "mouse" | null>(null);
   const [afterSample, setAfterSample] = useState<Sample | null>(null);
   const [afterScore, setAfterScore] = useState<number | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState("");
+  const [characterSamples, setCharacterSamples] = useState<Sample[]>([]);
+  const [characterSummary, setCharacterSummary] = useState<AnalysisSummary | null>(null);
 
   const sampleNumber = samples.length + 1;
   const hasEnoughInk = useMemo(
     () => strokes.reduce((count, stroke) => count + stroke.points.length, 0) >= 8,
     [strokes],
   );
-  const isDrawingPhase = phase === "write" || phase === "practice";
+  const practiceCharacters = useMemo(
+    () => getHangulCharacters(prompt, feedback?.characterTarget),
+    [feedback?.characterTarget, prompt],
+  );
+  const characterAttemptScores = useMemo(
+    () =>
+      characterSummary && characterSamples.length === 3
+        ? characterSamples.map((sample) => scorePracticeSample(sample, characterSummary))
+        : [],
+    [characterSamples, characterSummary],
+  );
+  const isDrawingPhase = phase === "write" || phase === "practice" || phase === "character-practice";
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -697,6 +874,9 @@ export default function Home() {
     setFeedback(null);
     setAfterSample(null);
     setAfterScore(null);
+    setSelectedCharacter("");
+    setCharacterSamples([]);
+    setCharacterSummary(null);
     setAnalysisMode("local");
     setInputMode(null);
     resetCanvas();
@@ -717,6 +897,46 @@ export default function Home() {
     setAfterScore(scorePracticeSample(practiceSample, summary));
     resetCanvas();
     setPhase("result");
+  };
+
+  const startCharacterPractice = () => {
+    const character =
+      Array.from(feedback?.characterTarget ?? "").find((item) => /[가-힣]/.test(item)) ??
+      practiceCharacters[0] ??
+      "가";
+    setSelectedCharacter(character);
+    setCharacterSamples([]);
+    setCharacterSummary(null);
+    resetCanvas();
+    setPhase("character-practice");
+  };
+
+  const chooseCharacter = (character: string) => {
+    if (characterSamples.length > 0) return;
+    setSelectedCharacter(character);
+    resetCanvas();
+  };
+
+  const submitCharacterSample = () => {
+    if (!hasEnoughInk) return;
+    const currentSample: Sample = { strokes, pointerType: inputMode ?? "unknown" };
+    const nextSamples = [...characterSamples, currentSample];
+    if (nextSamples.length < 3) {
+      setCharacterSamples(nextSamples);
+      resetCanvas();
+      return;
+    }
+    setCharacterSamples(nextSamples);
+    setCharacterSummary(analyzeSamples(nextSamples));
+    resetCanvas();
+    setPhase("character-result");
+  };
+
+  const repeatCharacterPractice = () => {
+    setCharacterSamples([]);
+    setCharacterSummary(null);
+    resetCanvas();
+    setPhase("character-practice");
   };
 
   return (
@@ -902,6 +1122,140 @@ export default function Home() {
         </section>
       )}
 
+      {phase === "character-practice" && (
+        <section className="workspace-card writing-card character-practice-card">
+          <div className="card-heading character-lab-heading">
+            <div>
+              <p className="section-kicker">FOCUS CHARACTER LAB</p>
+              <h2>한 글자 집중 연습실</h2>
+            </div>
+            <div className="character-progress-chip">{characterSamples.length + 1} / 3</div>
+          </div>
+
+          <div className="character-picker-block">
+            <div className="character-picker-title">
+              <span>연습할 글자</span>
+              <small>{characterSamples.length ? "3번을 마칠 때까지 같은 글자를 써요" : "문장 속 글자를 직접 고를 수 있어요"}</small>
+            </div>
+            <div className="character-picker" aria-label="연습할 한글 선택">
+              {practiceCharacters.map((character, index) => (
+                <button
+                  className={selectedCharacter === character ? "selected" : ""}
+                  type="button"
+                  onClick={() => chooseCharacter(character)}
+                  disabled={characterSamples.length > 0 && selectedCharacter !== character}
+                  key={character}
+                >
+                  {character}
+                  {index === 0 && feedback?.characterTarget?.includes(character) && <span>AI</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="character-instruction">
+            <span className="character-target-mini">{selectedCharacter}</span>
+            <div>
+              <strong>평소 쓰는 획순으로 크게 써 보세요</strong>
+              <p>빠르게 잘 쓰려 하지 말고, 펜이 어디서 시작하고 얼마나 머무는지 그대로 기록해요.</p>
+            </div>
+          </div>
+
+          <div className="character-paper">
+            <span className="character-watermark" aria-hidden="true">{selectedCharacter}</span>
+            <div className="paper-label">
+              <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Write large"}</span>
+              <span>{characterSamples.length + 1}번째 시도 · 화면 안에 한 글자만 크게</span>
+            </div>
+            <canvas
+              ref={canvasRef}
+              className="writing-canvas character-canvas"
+              aria-label={`${selectedCharacter} 한 글자 필기 입력 영역`}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onContextMenu={(event) => event.preventDefault()}
+            />
+            {!strokes.length && (
+              <div className="canvas-hint character-canvas-hint" aria-hidden="true">
+                <span>{selectedCharacter} 한 글자를 써 보세요</span>
+              </div>
+            )}
+          </div>
+
+          <div className="canvas-actions character-actions">
+            <div>
+              <button className="quiet-button" type="button" onClick={() => setStrokes((current) => current.slice(0, -1))} disabled={!strokes.length}>
+                한 획 지우기
+              </button>
+              <button className="quiet-button" type="button" onClick={resetCanvas} disabled={!strokes.length}>
+                모두 지우기
+              </button>
+            </div>
+            <button className="primary-button" type="button" onClick={submitCharacterSample} disabled={!hasEnoughInk || !selectedCharacter}>
+              {characterSamples.length < 2 ? `${characterSamples.length + 1}번째 글자 저장` : "속도 히트맵 분석하기"}
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+
+          <div className="privacy-note">
+            <span>✓</span>
+            획의 좌표·시간·압력은 이 분석 화면에서만 사용하고 따로 저장하지 않아요.
+          </div>
+        </section>
+      )}
+
+      {phase === "character-result" && characterSummary && characterSamples.length === 3 && (
+        <section className="workspace-card character-result-card">
+          <div className="character-result-hero">
+            <div className="character-result-mark" aria-hidden="true">{selectedCharacter}</div>
+            <div>
+              <p className="section-kicker">CHARACTER MOTION RESULT</p>
+              <h2>“{selectedCharacter}”의 획 리듬을 분석했어요</h2>
+              <p>탭을 눌러 세 번의 글씨를 비교하고, 재생 버튼으로 획의 시작 순서와 속도 변화를 확인하세요.</p>
+            </div>
+            <div className="mini-score-ring" style={{ "--score": characterSummary.consistency } as React.CSSProperties}>
+              <div><strong>{characterSummary.consistency}</strong><span>안정성</span></div>
+            </div>
+          </div>
+
+          <div className="character-result-grid">
+            <CharacterHeatmap samples={characterSamples} character={selectedCharacter} />
+            <aside className="character-result-insight">
+              <p className="section-kicker">FIRST → THIRD</p>
+              <h3>세 번째 글씨는 얼마나 안정됐을까요?</h3>
+              <div className="character-score-change">
+                <div><span>1번째</span><strong>{characterAttemptScores[0] ?? 0}<small>점</small></strong></div>
+                <b aria-hidden="true">→</b>
+                <div className="latest"><span>3번째</span><strong>{characterAttemptScores[2] ?? 0}<small>점</small></strong></div>
+              </div>
+              <p className={characterAttemptScores[2] >= characterAttemptScores[0] ? "character-delta up" : "character-delta"}>
+                {characterAttemptScores[2] >= characterAttemptScores[0] ? "+" : ""}
+                {(characterAttemptScores[2] ?? 0) - (characterAttemptScores[0] ?? 0)}점 변화
+              </p>
+
+              <div className="character-stat-grid">
+                <div><span>평균 획 수</span><strong>{Math.round(characterSummary.averages.strokeCount)}획</strong></div>
+                <div><span>속도 안정성</span><strong>{Math.round(clamp(100 - characterSummary.variations.speed * 180, 34, 98))}</strong></div>
+                <div><span>리듬 안정성</span><strong>{Math.round(clamp(100 - characterSummary.variations.rhythm * 180, 34, 98))}</strong></div>
+              </div>
+
+              <div className="character-result-tip">
+                <span>오늘의 초점 · {characterSummary.focusLabel}</span>
+                <strong>{FOCUS_COPY[characterSummary.focusKey].tip}</strong>
+              </div>
+            </aside>
+          </div>
+
+          <div className="character-result-actions">
+            <button className="primary-button" type="button" onClick={repeatCharacterPractice}>같은 글자 다시 연습</button>
+            <button className="quiet-outline-button" type="button" onClick={repeatCharacterPractice}>다른 글자 선택</button>
+            <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>문장 분석 결과로 돌아가기</button>
+          </div>
+        </section>
+      )}
+
       {phase === "result" && summary && feedback && (
         <section className="result-layout">
           <div className="workspace-card score-card">
@@ -1030,6 +1384,11 @@ export default function Home() {
               <div>{feedback.exercise.map((word) => <b key={word}>{word}</b>)}</div>
             </div>
             <p className="encouragement">“{feedback.encouragement}”</p>
+            <button className="character-lab-button" type="button" onClick={startCharacterPractice}>
+              <span aria-hidden="true">{practiceCharacters[0] ?? "가"}</span>
+              <span><strong>한 글자 집중 연습실</strong><small>획순 번호와 속도 히트맵 보기</small></span>
+              <b aria-hidden="true">→</b>
+            </button>
             <button className="primary-button full" type="button" onClick={startPractice}>
               {afterSample ? "한 번 더 교정 연습" : "이 포인트로 한 번 더 써보기"} <span aria-hidden="true">→</span>
             </button>
