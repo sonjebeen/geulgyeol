@@ -547,16 +547,21 @@ function drawReconstructedText(
     round: { width: 0.98, size: 0.98, slant: -0.015 },
     flow: { width: 0.9, size: 1.04, slant: -0.13 },
   }[styleKey];
-  const unitWidth = (bounds.width * width) / totalUnits;
-  const heightLimit = Math.max(24, bounds.height * height * 1.02);
-  const fontSize = Math.max(18, Math.min(heightLimit, (unitWidth * 1.02) / style.width) * style.size);
+  const availableWidth = (PROMPT_GRID_END - PROMPT_GRID_START) * width;
+  const unitWidth = availableWidth / totalUnits;
+  const handwritingHeight = Math.max(bounds.height * height, height * 0.38);
+  const fontSize = Math.max(
+    22,
+    Math.min(height * 0.62, handwritingHeight, (unitWidth * 1.12) / style.width) * style.size,
+  );
   const personalSlant = -estimateHandwritingSlant(source);
   const identityMix = identity / 100;
   const slant = style.slant * (1 - identityMix * 0.45) + personalSlant * identityMix * 0.45;
-  const personalWidth = clamp(unitWidth / Math.max(bounds.height * height, 1), 0.72, 1.06);
+  const sourceUnitWidth = (bounds.width * width) / totalUnits;
+  const personalWidth = clamp(sourceUnitWidth / Math.max(bounds.height * height, 1), 0.72, 1.06);
   const glyphWidth = style.width * (1 - identityMix * 0.34) + personalWidth * identityMix * 0.34;
-  const baseline = bounds.maxY * height - fontSize * 0.025;
-  let cursor = bounds.minX * width;
+  const baseline = clamp(bounds.maxY * height - fontSize * 0.025, fontSize + height * 0.06, height * 0.88);
+  let cursor = PROMPT_GRID_START * width;
 
   ctx.save();
   ctx.fillStyle = options?.color ?? "#ed735f";
@@ -1251,6 +1256,7 @@ export default function Home() {
   const [beautyIdentity, setBeautyIdentity] = useState(58);
   const [beautyPracticeScore, setBeautyPracticeScore] = useState<number | null>(null);
   const [selectedDiagnosisIndex, setSelectedDiagnosisIndex] = useState(0);
+  const previousPhaseRef = useRef(phase);
 
   const sampleNumber = samples.length + 1;
   const hasEnoughInk = useMemo(
@@ -1320,6 +1326,15 @@ export default function Home() {
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [redraw]);
+
+  useEffect(() => {
+    if (previousPhaseRef.current === phase) return;
+    previousPhaseRef.current = phase;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("handwriting-flow")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
 
   const eventPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1561,7 +1576,7 @@ export default function Home() {
         </p>
       </section>
 
-      <nav className="stepper" aria-label="분석 진행 단계">
+      <nav className="stepper" id="handwriting-flow" aria-label="분석 진행 단계">
         {["3번 쓰기", "움직임 분석", "글자별 교정"].map((label, index) => {
           const activeIndex = phase === "write" ? 0 : phase === "analyzing" ? 1 : 2;
           return (
