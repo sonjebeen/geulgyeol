@@ -68,11 +68,22 @@ test("includes focused character practice and motion heatmap controls", async ()
 test("includes the local character map and direct correction path", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(source, /문장 해부도/);
-  assert.match(source, /제시 문장 기반 획 매칭 · API 0원/);
+  assert.match(source, /고정 글자 칸 획 매칭 · API 0원/);
   assert.match(source, /analyzePromptCharacters/);
   assert.match(source, /splitSampleIntoPromptCells/);
   assert.match(source, /이 글자 집중 교정/);
   assert.match(source, /1→3회/);
+});
+
+test("uses fixed character cells for reliable prompt alignment", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(source, /한 칸에 한 글자씩 써 주세요/);
+  assert.match(source, /getPromptCellLayout/);
+  assert.match(source, /PromptCellGuide/);
+  assert.match(source, /hasEnoughSentenceInk/);
+  assert.match(styles, /\.character-grid-paper/);
+  assert.match(styles, /\.prompt-cell-guide\.filled/);
 });
 
 test("includes personal handwriting beautification and tracing", async () => {

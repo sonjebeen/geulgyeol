@@ -104,10 +104,13 @@ type CharacterDiagnosis = {
 };
 
 const PROMPTS = [
-  "오늘의 마음을 천천히 기록합니다.",
-  "작은 습관이 좋은 하루를 만듭니다.",
-  "나만의 속도로 또박또박 써 내려갑니다.",
+  "오늘도 천천히 씁니다.",
+  "작은 습관이 나를 만듭니다.",
+  "나답게 또박또박 씁니다.",
 ];
+
+const PROMPT_GRID_START = 0.025;
+const PROMPT_GRID_END = 0.975;
 
 const BEAUTY_STYLES: Record<
   BeautyStyleKey,
@@ -511,6 +514,20 @@ function getPromptUnits(prompt: string) {
   }));
 }
 
+function getPromptCellLayout(prompt: string) {
+  const units = getPromptUnits(prompt);
+  const totalUnits = units.reduce((sum, unit) => sum + unit.width, 0);
+  const usableWidth = PROMPT_GRID_END - PROMPT_GRID_START;
+  let cursor = 0;
+
+  return units.map((unit, promptIndex) => {
+    const start = PROMPT_GRID_START + (cursor / Math.max(totalUnits, 1)) * usableWidth;
+    cursor += unit.width;
+    const end = PROMPT_GRID_START + (cursor / Math.max(totalUnits, 1)) * usableWidth;
+    return { ...unit, promptIndex, start, end, widthRatio: end - start };
+  });
+}
+
 function drawReconstructedText(
   ctx: CanvasRenderingContext2D,
   source: Sample,
@@ -748,16 +765,9 @@ function standardDeviation(values: number[]) {
 }
 
 function splitSampleIntoPromptCells(sample: Sample, prompt: string): CharacterCellMetric[] {
-  const units = getPromptUnits(prompt);
-  const totalUnits = units.reduce((sum, unit) => sum + unit.width, 0);
-  const bounds = getSampleBounds(sample);
-  const sampleHeight = Math.max(bounds.height, 0.08);
-  let cursor = 0;
-
-  return units.map((unit) => {
-    const cellStart = bounds.minX + (cursor / Math.max(totalUnits, 1)) * bounds.width;
-    cursor += unit.width;
-    const cellEnd = bounds.minX + (cursor / Math.max(totalUnits, 1)) * bounds.width;
+  return getPromptCellLayout(prompt).map((unit) => {
+    const cellStart = unit.start;
+    const cellEnd = unit.end;
     const cellWidth = Math.max(cellEnd - cellStart, 0.015);
     const matchingStrokes = sample.strokes.filter((stroke) => {
       if (!stroke.points.length) return false;
@@ -772,7 +782,7 @@ function splitSampleIntoPromptCells(sample: Sample, prompt: string): CharacterCe
         points: stroke.points.map((point) => ({
           ...point,
           x: clamp((point.x - cellStart) / cellWidth, 0, 1),
-          y: clamp(0.1 + ((point.y - bounds.minY) / sampleHeight) * 0.8, 0.04, 0.96),
+          y: clamp(0.05 + point.y * 0.9, 0.04, 0.96),
         })),
       })),
     };
@@ -794,9 +804,9 @@ function splitSampleIntoPromptCells(sample: Sample, prompt: string): CharacterCe
     const xs = points.map((point) => point.x);
     const ys = points.map((point) => point.y);
     const width = (Math.max(...xs) - Math.min(...xs)) / cellWidth;
-    const height = (Math.max(...ys) - Math.min(...ys)) / sampleHeight;
+    const height = Math.max(...ys) - Math.min(...ys);
     const center = clamp((mean(xs) - cellStart) / cellWidth, 0, 1);
-    const baseline = clamp((Math.max(...ys) - bounds.minY) / sampleHeight, 0, 1);
+    const baseline = clamp(Math.max(...ys), 0, 1);
     const localMetric = measureSample(localSample);
 
     return {
@@ -1186,6 +1196,30 @@ function CharacterCropThumbnail({ sample, label }: { sample: Sample; label: stri
   );
 }
 
+function PromptCellGuide({ prompt, filledIndexes }: { prompt: string; filledIndexes: Set<number> }) {
+  return (
+    <div className="writing-grid-guide" aria-hidden="true">
+      {getPromptCellLayout(prompt).map((unit) => {
+        const kind = /\s/.test(unit.character)
+          ? "space"
+          : /[가-힣]/.test(unit.character)
+            ? "hangul"
+            : "punctuation";
+        return (
+          <div
+            className={`prompt-cell-guide ${kind} ${filledIndexes.has(unit.promptIndex) ? "filled" : ""}`}
+            style={{ left: `${unit.start * 100}%`, width: `${unit.widthRatio * 100}%` }}
+            key={unit.promptIndex}
+          >
+            {kind !== "space" && <span>{unit.character}</span>}
+            {kind === "hangul" && <i />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<Stroke[]>([]);
@@ -1223,6 +1257,24 @@ export default function Home() {
     () => strokes.reduce((count, stroke) => count + stroke.points.length, 0) >= 8,
     [strokes],
   );
+  const currentPromptCells = useMemo(
+    () => splitSampleIntoPromptCells({ strokes, pointerType: inputMode ?? "unknown" }, prompt),
+    [inputMode, prompt, strokes],
+  );
+  const filledPromptIndexes = useMemo(
+    () => new Set(
+      currentPromptCells.flatMap((cell, promptIndex) =>
+        !cell.empty && /[가-힣]/.test(Array.from(prompt)[promptIndex] ?? "") ? [promptIndex] : [],
+      ),
+    ),
+    [currentPromptCells, prompt],
+  );
+  const promptHangulCount = useMemo(
+    () => Array.from(prompt).filter((character) => /[가-힣]/.test(character)).length,
+    [prompt],
+  );
+  const filledHangulCount = filledPromptIndexes.size;
+  const hasEnoughSentenceInk = hasEnoughInk && filledHangulCount >= Math.ceil(promptHangulCount * 0.65);
   const practiceCharacters = useMemo(
     () => getHangulCharacters(prompt, feedback?.characterTarget),
     [feedback?.characterTarget, prompt],
@@ -1331,7 +1383,7 @@ export default function Home() {
   };
 
   const submitSample = async () => {
-    if (!hasEnoughInk) return;
+    if (!hasEnoughSentenceInk) return;
     const currentSample: Sample = {
       strokes,
       pointerType: inputMode ?? "unknown",
@@ -1406,7 +1458,7 @@ export default function Home() {
   };
 
   const submitPractice = () => {
-    if (!hasEnoughInk || !summary) return;
+    if (!hasEnoughSentenceInk || !summary) return;
     const practiceSample: Sample = { strokes, pointerType: inputMode ?? "unknown" };
     setAfterSample(practiceSample);
     setAfterScore(scorePracticeSample(practiceSample, summary));
@@ -1526,7 +1578,7 @@ export default function Home() {
           <div className="card-heading">
             <div>
               <p className="section-kicker">SAMPLE {sampleNumber} / 3</p>
-              <h2>아래 문장을 평소처럼 써 주세요</h2>
+              <h2>한 칸에 한 글자씩 써 주세요</h2>
             </div>
             <div className="sample-dots" aria-label={`${sampleNumber}번째 필기 중`}>
               {[0, 1, 2].map((index) => (
@@ -1548,26 +1600,31 @@ export default function Home() {
             </label>
           </div>
 
-          <div className="paper-wrap">
-            <div className="paper-label">
-              <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Write here"}</span>
-              <span>손바닥이 닿아도 한 번에 하나의 입력만 기록해요</span>
-            </div>
-            <canvas
-              ref={canvasRef}
-              className="writing-canvas"
-              aria-label="한글 필기 입력 영역"
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onContextMenu={(event) => event.preventDefault()}
-            />
-            {!strokes.length && (
-              <div className="canvas-hint" aria-hidden="true">
-                <span>손가락이나 펜으로 이곳에 써 보세요</span>
+          <div className="writing-grid-scroll">
+            <div className="paper-wrap character-grid-paper">
+              <div className="paper-label">
+                <span>{inputMode === "pen" ? "Pencil cell mode" : inputMode === "touch" ? "Finger cell mode" : "Character cell mode"}</span>
+                <span className={hasEnoughSentenceInk ? "grid-progress complete" : "grid-progress"}>
+                  {filledHangulCount} / {promptHangulCount}칸 입력
+                </span>
               </div>
-            )}
+              <PromptCellGuide prompt={prompt} filledIndexes={filledPromptIndexes} />
+              <canvas
+                ref={canvasRef}
+                className="writing-canvas sentence-grid-canvas"
+                aria-label="글자 칸 방식 한글 필기 입력 영역"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onContextMenu={(event) => event.preventDefault()}
+              />
+              {!strokes.length && (
+                <div className="canvas-hint grid-canvas-hint" aria-hidden="true">
+                  <span>각 칸의 글자를 칸 안에 한 글자씩 써 보세요</span>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="canvas-actions">
@@ -1579,15 +1636,19 @@ export default function Home() {
                 모두 지우기
               </button>
             </div>
-            <button className="primary-button" type="button" onClick={submitSample} disabled={!hasEnoughInk}>
-              {sampleNumber < 3 ? `${sampleNumber}번째 글씨 저장` : "세 글씨 비교하기"}
+            <button className="primary-button" type="button" onClick={submitSample} disabled={!hasEnoughSentenceInk}>
+              {!hasEnoughSentenceInk
+                ? `${filledHangulCount} / ${promptHangulCount}칸 입력 중`
+                : sampleNumber < 3
+                  ? `${sampleNumber}번째 글씨 저장`
+                  : "세 글씨 비교하기"}
               <span aria-hidden="true">→</span>
             </button>
           </div>
 
           <div className="privacy-note">
             <span>✓</span>
-            원본 획은 저장하지 않으며, AI 연결 시 축소된 비교 이미지와 요약값만 분석해요.
+            칸의 위치로 글자를 구분해요. 원본 획은 저장하거나 외부로 보내지 않아요.
           </div>
         </section>
       )}
@@ -1600,9 +1661,9 @@ export default function Home() {
           </div>
           <p className="section-kicker">MOTION ANALYSIS</p>
           <h2>세 번의 움직임을 겹쳐 보고 있어요</h2>
-          <p>문장을 글자 단위로 나누고, 크기·위치·속도·획의 리듬이 가장 흔들리는 곳을 찾습니다.</p>
+          <p>고정된 글자 칸마다 크기·기준선·속도·획의 리듬이 가장 흔들리는 곳을 찾습니다.</p>
           <div className="scan-list">
-            <span>글자 위치 매칭</span><span>크기 일관성</span><span>속도 변화</span><span>획 리듬</span>
+            <span>고정 칸 분리</span><span>크기 일관성</span><span>속도 변화</span><span>획 리듬</span>
           </div>
         </section>
       )}
@@ -1627,26 +1688,31 @@ export default function Home() {
             <p>{prompt}</p>
           </div>
 
-          <div className="paper-wrap">
-            <div className="paper-label">
-              <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Correction round"}</span>
-              <span>방금 본 한 가지 포인트에만 집중해 보세요</span>
-            </div>
-            <canvas
-              ref={canvasRef}
-              className="writing-canvas"
-              aria-label="교정 후 한글 필기 입력 영역"
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onContextMenu={(event) => event.preventDefault()}
-            />
-            {!strokes.length && (
-              <div className="canvas-hint" aria-hidden="true">
-                <span>같은 문장을 다시 써 보세요</span>
+          <div className="writing-grid-scroll">
+            <div className="paper-wrap character-grid-paper">
+              <div className="paper-label">
+                <span>{inputMode === "pen" ? "Pencil correction cells" : inputMode === "touch" ? "Finger correction cells" : "Correction cell mode"}</span>
+                <span className={hasEnoughSentenceInk ? "grid-progress complete" : "grid-progress"}>
+                  {filledHangulCount} / {promptHangulCount}칸 입력
+                </span>
               </div>
-            )}
+              <PromptCellGuide prompt={prompt} filledIndexes={filledPromptIndexes} />
+              <canvas
+                ref={canvasRef}
+                className="writing-canvas sentence-grid-canvas"
+                aria-label="교정 후 글자 칸 방식 한글 필기 입력 영역"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onContextMenu={(event) => event.preventDefault()}
+              />
+              {!strokes.length && (
+                <div className="canvas-hint grid-canvas-hint" aria-hidden="true">
+                  <span>같은 칸과 기준선을 유지하며 다시 써 보세요</span>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="canvas-actions">
@@ -1658,8 +1724,8 @@ export default function Home() {
                 모두 지우기
               </button>
             </div>
-            <button className="primary-button" type="button" onClick={submitPractice} disabled={!hasEnoughInk}>
-              교정 후 점수 확인 <span aria-hidden="true">→</span>
+            <button className="primary-button" type="button" onClick={submitPractice} disabled={!hasEnoughSentenceInk}>
+              {hasEnoughSentenceInk ? "교정 후 점수 확인" : `${filledHangulCount} / ${promptHangulCount}칸 입력 중`} <span aria-hidden="true">→</span>
             </button>
           </div>
         </section>
@@ -2023,7 +2089,7 @@ export default function Home() {
                     <p className="section-kicker">CHARACTER MAP</p>
                     <h3>문장 해부도</h3>
                   </div>
-                  <span><i aria-hidden="true" /> 제시 문장 기반 획 매칭 · API 0원</span>
+                  <span><i aria-hidden="true" /> 고정 글자 칸 획 매칭 · API 0원</span>
                 </div>
 
                 <div className="sentence-character-map" aria-label="글자별 안정성 지도">
@@ -2164,7 +2230,7 @@ export default function Home() {
             ) : (
               <div className="character-insight-card pending">
                 <span className="vision-mark" aria-hidden="true">ON</span>
-                <div><strong>기기 안에서 글자별 매칭 완료</strong><p>제시 문장과 획의 위치를 맞춰 가장 흔들린 글자를 찾았어요. 이미지와 개인정보는 전송하지 않아요.</p></div>
+                <div><strong>기기 안에서 글자별 매칭 완료</strong><p>정해진 칸 안의 획만 해당 글자로 분석해 옆 글자와 섞이지 않아요. 이미지와 개인정보는 전송하지 않아요.</p></div>
               </div>
             )}
             <div className="coach-tip">
