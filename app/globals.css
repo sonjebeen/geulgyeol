@@ -175,6 +175,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .beauty-studio-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .beauty-studio-heading h2 { margin: 0 0 9px; font-size: clamp(27px, 3.5vw, 43px); letter-spacing: -0.06em; }
 .beauty-studio-heading > div > p:last-child { max-width: 630px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.75; word-break: keep-all; }
+.recognized-text-status { display: grid; grid-template-columns: 39px minmax(180px, 1fr) minmax(210px, auto) auto; gap: 13px; align-items: center; margin-top: 24px; padding: 14px 16px; border: 1px solid rgba(90, 169, 133, 0.32); border-radius: 16px; background: #edf4f0; }
+.recognized-text-status > span { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 12px; background: #5aa985; color: white; font-weight: 950; }
+.recognized-text-status strong { display: block; color: #2d7252; font-size: 11px; }
+.recognized-text-status p { margin: 3px 0 0; color: #5c7165; font-size: 8px; line-height: 1.5; word-break: keep-all; }
+.recognized-text-status b { padding: 9px 12px; border-radius: 10px; background: rgba(255, 254, 250, 0.78); font-family: "Gowun Dodum", "Apple SD Gothic Neo", sans-serif; font-size: 12px; white-space: nowrap; }
+.recognized-text-status small { color: #397155; font-size: 7px; font-weight: 850; white-space: nowrap; }
 .beauty-style-section { margin-top: 30px; }
 .beauty-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .beauty-section-title span, .beauty-identity-control > div > span { font-size: 11px; font-weight: 900; }
@@ -359,6 +365,8 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .character-result-grid { grid-template-columns: 1fr; }
   .beauty-style-grid { grid-template-columns: 1fr; }
   .beauty-style-card { grid-template-columns: 54px minmax(0, 1fr) 21px; }
+  .recognized-text-status { grid-template-columns: 39px 1fr; }
+  .recognized-text-status b, .recognized-text-status small { grid-column: 2; justify-self: start; }
   .metric-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .overlay-paper canvas { height: 220px; }
 }
@@ -423,6 +431,8 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .compare-arrow { transform: rotate(90deg); text-align: center; }
   .comparison-sample { grid-template-columns: 1fr 44px; }
   .beauty-studio-card { padding: 22px 15px; border-radius: 20px; }
+  .recognized-text-status { padding: 12px; }
+  .recognized-text-status b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .beauty-style-card { padding: 11px; }
   .beauty-style-mark { width: 47px; height: 47px; }
   .beauty-preview-paper canvas { height: 185px; }

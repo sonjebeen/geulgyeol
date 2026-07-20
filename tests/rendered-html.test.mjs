@@ -67,15 +67,19 @@ test("includes focused character practice and motion heatmap controls", async ()
 
 test("includes personal handwriting beautification and tracing", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
   assert.match(source, /내 글씨 예쁘게 만들기/);
   assert.match(source, /단정한 정리체/);
   assert.match(source, /둥근 온기체/);
   assert.match(source, /가벼운 흐름체/);
-  assert.match(source, /beautifySample/);
-  assert.match(source, /targetBaseline/);
-  assert.match(source, /기준선 정렬/);
-  assert.match(source, /measureCorrectionDistance/);
+  assert.match(source, /drawReconstructedText/);
+  assert.match(source, /ReconstructedTextCanvas/);
+  assert.match(source, /정확한 자모 구조/);
+  assert.match(source, /API 비용 0원/);
   assert.match(source, /min="40"/);
-  assert.match(source, /scoreAgainstTarget/);
+  assert.match(source, /scoreAgainstReconstructedText/);
   assert.match(source, /가이드 유사도 확인/);
+  assert.match(layout, /@fontsource\/gowun-dodum\/korean-400\.css/);
+  assert.match(layout, /@fontsource\/jua\/korean-400\.css/);
+  assert.match(layout, /@fontsource\/nanum-pen-script\/korean-400\.css/);
 });

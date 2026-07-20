@@ -84,28 +84,31 @@ const PROMPTS = [
 
 const BEAUTY_STYLES: Record<
   BeautyStyleKey,
-  { name: string; english: string; description: string; changes: string[]; mark: string }
+  { name: string; english: string; description: string; changes: string[]; mark: string; fontFamily: string }
 > = {
   neat: {
     name: "단정한 정리체",
     english: "NEAT",
-    description: "글자별 기준선과 높이를 맞추고 가로·세로획을 또렷하게 펴요.",
-    changes: ["기준선 정렬", "높이 통일", "직선 획 정돈"],
+    description: "알아보기 쉬운 한글 골격에 내 글씨의 크기와 간격을 담아요.",
+    changes: ["정확한 자모 구조", "고른 기준선", "단정한 간격"],
     mark: "가",
+    fontFamily: "Gowun Dodum",
   },
   round: {
     name: "둥근 온기체",
     english: "ROUND",
-    description: "글자 높이는 맞추고 원래 필체의 굴곡을 더 둥글고 크게 살려요.",
-    changes: ["기준선 정렬", "곡선 강조", "넉넉한 너비"],
+    description: "정확한 글자 모양을 유지하면서 둥글고 편안한 인상을 더해요.",
+    changes: ["정확한 자모 구조", "둥근 모서리", "넉넉한 너비"],
     mark: "동",
+    fontFamily: "Jua",
   },
   flow: {
     name: "가벼운 흐름체",
     english: "FLOW",
-    description: "글자 사이를 정돈하고 오른쪽으로 흐르는 기울기를 분명하게 만들어요.",
-    changes: ["간격 정돈", "오른쪽 기울기", "가벼운 리듬"],
+    description: "읽을 수 있는 한글 골격에 펜으로 쓴 듯한 가벼운 리듬을 더해요.",
+    changes: ["정확한 자모 구조", "손글씨 질감", "가벼운 리듬"],
     mark: "결",
+    fontFamily: "Nanum Pen Script",
   },
 };
 
@@ -419,184 +422,135 @@ function scorePracticeSample(sample: Sample, summary: AnalysisSummary) {
   return Math.round(clamp(97 - focused * 48 - overall * 30, 42, 98));
 }
 
-function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: number, prompt: string): Sample {
-  const allPoints = sample.strokes.flatMap((stroke) => stroke.points);
-  if (!allPoints.length) return sample;
-  const minX = Math.min(...allPoints.map((point) => point.x));
-  const maxX = Math.max(...allPoints.map((point) => point.x));
-  const minY = Math.min(...allPoints.map((point) => point.y));
-  const maxY = Math.max(...allPoints.map((point) => point.y));
-  const strength = clamp((100 - identity) / 45, 0.22, 1.18);
-  const style = {
-    neat: { smoothing: 0.76, width: 0.98, height: 1, shear: 0, curve: -0.42, align: 0.9 },
-    round: { smoothing: 0.82, width: 1.07, height: 1.08, shear: -0.018, curve: 0.48, align: 0.68 },
-    flow: { smoothing: 0.64, width: 1.08, height: 0.94, shear: -0.16, curve: 0.16, align: 0.5 },
-  }[styleKey];
+function getSampleBounds(sample: Sample) {
+  const points = sample.strokes.flatMap((stroke) => stroke.points);
+  if (!points.length) return { minX: 0.06, maxX: 0.94, minY: 0.22, maxY: 0.78, width: 0.88, height: 0.56 };
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  return { minX, maxX, minY, maxY, width: maxX - minX, height: maxY - minY };
+}
 
-  const promptUnits = Array.from(prompt).map((character) => ({
+function estimateHandwritingSlant(sample: Sample) {
+  const slants = sample.strokes.flatMap((stroke) => {
+    if (stroke.points.length < 2) return [];
+    const first = stroke.points[0];
+    const last = stroke.points[stroke.points.length - 1];
+    const top = first.y <= last.y ? first : last;
+    const bottom = first.y <= last.y ? last : first;
+    const verticalDistance = bottom.y - top.y;
+    if (verticalDistance < 0.04 || Math.abs(bottom.x - top.x) > verticalDistance * 0.85) return [];
+    return [(top.x - bottom.x) / verticalDistance];
+  });
+  return clamp(mean(slants), -0.22, 0.22);
+}
+
+function getPromptUnits(prompt: string) {
+  return Array.from(prompt).map((character) => ({
     character,
-    width: /\s/.test(character) ? 0.62 : /[.,!?·]/.test(character) ? 0.42 : 1,
+    width: /\s/.test(character) ? 0.58 : /[.,!?·]/.test(character) ? 0.42 : 1,
   }));
-  const totalPromptWidth = promptUnits.reduce((sum, unit) => sum + unit.width, 0);
-  let promptCursor = 0;
-  const slots = promptUnits.flatMap((unit) => {
-    const center = promptCursor + unit.width / 2;
-    promptCursor += unit.width;
-    return /[가-힣]/.test(unit.character)
-      ? [minX + (center / Math.max(totalPromptWidth, 1)) * (maxX - minX)]
-      : [];
-  });
+}
 
-  const strokeBounds = sample.strokes.map((stroke) => {
-    const xs = stroke.points.map((point) => point.x);
-    const ys = stroke.points.map((point) => point.y);
-    return {
-      minX: Math.min(...xs),
-      maxX: Math.max(...xs),
-      minY: Math.min(...ys),
-      maxY: Math.max(...ys),
-      centerX: (Math.min(...xs) + Math.max(...xs)) / 2,
-    };
-  });
-  const groups = slots.map((targetCenterX) => ({ targetCenterX, strokeIndexes: [] as number[] }));
-  strokeBounds.forEach((bounds, strokeIndex) => {
-    if (!groups.length) return;
-    let closestIndex = 0;
-    for (let index = 1; index < groups.length; index += 1) {
-      if (
-        Math.abs(groups[index].targetCenterX - bounds.centerX) <
-        Math.abs(groups[closestIndex].targetCenterX - bounds.centerX)
-      ) closestIndex = index;
+function drawReconstructedText(
+  ctx: CanvasRenderingContext2D,
+  source: Sample,
+  prompt: string,
+  width: number,
+  height: number,
+  styleKey: BeautyStyleKey,
+  identity: number,
+  options?: { color?: string; alpha?: number },
+) {
+  const bounds = getSampleBounds(source);
+  const units = getPromptUnits(prompt);
+  const totalUnits = units.reduce((sum, unit) => sum + unit.width, 0);
+  if (!totalUnits) return;
+  const style = {
+    neat: { width: 0.88, size: 0.94, slant: 0 },
+    round: { width: 0.98, size: 0.98, slant: -0.015 },
+    flow: { width: 0.9, size: 1.04, slant: -0.13 },
+  }[styleKey];
+  const unitWidth = (bounds.width * width) / totalUnits;
+  const heightLimit = Math.max(24, bounds.height * height * 1.02);
+  const fontSize = Math.max(18, Math.min(heightLimit, (unitWidth * 1.02) / style.width) * style.size);
+  const personalSlant = -estimateHandwritingSlant(source);
+  const identityMix = identity / 100;
+  const slant = style.slant * (1 - identityMix * 0.45) + personalSlant * identityMix * 0.45;
+  const personalWidth = clamp(unitWidth / Math.max(bounds.height * height, 1), 0.72, 1.06);
+  const glyphWidth = style.width * (1 - identityMix * 0.34) + personalWidth * identityMix * 0.34;
+  const baseline = bounds.maxY * height - fontSize * 0.025;
+  let cursor = bounds.minX * width;
+
+  ctx.save();
+  ctx.fillStyle = options?.color ?? "#ed735f";
+  ctx.globalAlpha = options?.alpha ?? 1;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = `400 ${fontSize}px "${BEAUTY_STYLES[styleKey].fontFamily}", "Apple SD Gothic Neo", sans-serif`;
+  units.forEach((unit) => {
+    const cellWidth = unitWidth * unit.width;
+    if (!/\s/.test(unit.character)) {
+      ctx.save();
+      ctx.translate(cursor + cellWidth / 2, baseline);
+      ctx.transform(1, 0, slant, 1, 0, 0);
+      ctx.scale(glyphWidth, 1);
+      ctx.fillText(unit.character, 0, 0);
+      ctx.restore();
     }
-    groups[closestIndex].strokeIndexes.push(strokeIndex);
+    cursor += cellWidth;
   });
-
-  const populatedGroups = groups
-    .filter((group) => group.strokeIndexes.length)
-    .map((group) => {
-      const bounds = group.strokeIndexes.map((index) => strokeBounds[index]);
-      const groupMinX = Math.min(...bounds.map((item) => item.minX));
-      const groupMaxX = Math.max(...bounds.map((item) => item.maxX));
-      const groupMinY = Math.min(...bounds.map((item) => item.minY));
-      const groupMaxY = Math.max(...bounds.map((item) => item.maxY));
-      return {
-        ...group,
-        minX: groupMinX,
-        maxX: groupMaxX,
-        minY: groupMinY,
-        maxY: groupMaxY,
-        centerX: (groupMinX + groupMaxX) / 2,
-        centerY: (groupMinY + groupMaxY) / 2,
-        width: Math.max(groupMaxX - groupMinX, 0.012),
-        height: Math.max(groupMaxY - groupMinY, 0.012),
-      };
-    });
-  const median = (values: number[]) => {
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[middle] : mean([sorted[middle - 1], sorted[middle]]);
-  };
-  const targetWidth = median(populatedGroups.map((group) => group.width));
-  const targetHeight = median(populatedGroups.map((group) => group.height));
-  const targetBaseline = median(populatedGroups.map((group) => group.maxY));
-  const groupByStroke = new Map<number, (typeof populatedGroups)[number]>();
-  populatedGroups.forEach((group) => group.strokeIndexes.forEach((index) => groupByStroke.set(index, group)));
-
-  return {
-    ...sample,
-    strokes: sample.strokes.map((stroke, strokeIndex) => {
-      const first = stroke.points[0];
-      const last = stroke.points[stroke.points.length - 1] ?? first;
-      const group = groupByStroke.get(strokeIndex);
-      const groupCenterX = group?.centerX ?? (minX + maxX) / 2;
-      const groupCenterY = group?.centerY ?? (minY + maxY) / 2;
-      const groupScaleX = group ? clamp(targetWidth / group.width, 0.78, 1.22) * style.width : style.width;
-      const groupScaleY = group ? clamp(targetHeight / group.height, 0.8, 1.2) * style.height : style.height;
-      const shiftX = group
-        ? clamp((group.targetCenterX - group.centerX) * style.align, -0.038, 0.038)
-        : 0;
-      const targetCenterY = targetBaseline - targetHeight / 2;
-      const shiftY = group ? clamp((targetCenterY - group.centerY) * style.align, -0.055, 0.055) : 0;
-      return {
-        ...stroke,
-        points: stroke.points.map((point, index, points) => {
-          const from = Math.max(0, index - 2);
-          const to = Math.min(points.length - 1, index + 2);
-          const neighbors = points.slice(from, to + 1);
-          const localX = mean(neighbors.map((item) => item.x));
-          const localY = mean(neighbors.map((item) => item.y));
-          const smoothX = point.x + (localX - point.x) * style.smoothing;
-          const smoothY = point.y + (localY - point.y) * style.smoothing;
-          const progress = points.length > 1 ? index / (points.length - 1) : 0;
-          const chordX = first.x + (last.x - first.x) * progress;
-          const chordY = first.y + (last.y - first.y) * progress;
-          const deltaX = Math.abs(last.x - first.x);
-          const deltaY = Math.abs(last.y - first.y);
-          const axisStroke = deltaX > deltaY * 1.7 || deltaY > deltaX * 1.7;
-          const curve = styleKey === "neat" && !axisStroke ? style.curve * 0.45 : style.curve;
-          const curvedX = chordX + (smoothX - chordX) * (1 + curve);
-          const curvedY = chordY + (smoothY - chordY) * (1 + curve);
-          const scaledX = groupCenterX + (curvedX - groupCenterX) * groupScaleX;
-          const scaledY = groupCenterY + (curvedY - groupCenterY) * groupScaleY;
-          const styledX = scaledX + (scaledY - groupCenterY) * style.shear + shiftX;
-          const styledY = scaledY + shiftY;
-          return {
-            ...point,
-            x: clamp(point.x + (styledX - point.x) * strength, 0.015, 0.985),
-            y: clamp(point.y + (styledY - point.y) * strength, 0.025, 0.975),
-          };
-        }),
-      };
-    }),
-  };
+  ctx.restore();
 }
 
-function measureCorrectionDistance(source: Sample, corrected: Sample) {
-  const distances: number[] = [];
-  const strokeCount = Math.min(source.strokes.length, corrected.strokes.length);
-  for (let index = 0; index < strokeCount; index += 1) {
-    const sourcePoints = resampleStroke(source.strokes[index], 18);
-    const correctedPoints = resampleStroke(corrected.strokes[index], 18);
-    sourcePoints.forEach((point, pointIndex) => {
-      const correctedPoint = correctedPoints[pointIndex];
-      if (correctedPoint) distances.push(Math.hypot(point.x - correctedPoint.x, point.y - correctedPoint.y));
-    });
+function maskCoverage(source: Uint8ClampedArray, target: Uint8ClampedArray, width: number, height: number, radius: number) {
+  let inkCount = 0;
+  let matchedCount = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4 + 3;
+      if (source[index] < 28) continue;
+      inkCount += 1;
+      let matched = false;
+      for (let offsetY = -radius; offsetY <= radius && !matched; offsetY += 1) {
+        const nextY = y + offsetY;
+        if (nextY < 0 || nextY >= height) continue;
+        for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+          const nextX = x + offsetX;
+          if (nextX < 0 || nextX >= width) continue;
+          if (target[(nextY * width + nextX) * 4 + 3] >= 28) {
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (matched) matchedCount += 1;
+    }
   }
-  return Math.max(1, Math.round(mean(distances) * 900));
+  return matchedCount / Math.max(inkCount, 1);
 }
 
-function resampleStroke(stroke: Stroke, count = 14) {
-  if (!stroke.points.length) return [];
-  return Array.from({ length: count }, (_, index) => {
-    const position = (index / Math.max(count - 1, 1)) * (stroke.points.length - 1);
-    const lower = Math.floor(position);
-    const upper = Math.min(stroke.points.length - 1, Math.ceil(position));
-    const mix = position - lower;
-    const a = stroke.points[lower];
-    const b = stroke.points[upper];
-    return { x: a.x + (b.x - a.x) * mix, y: a.y + (b.y - a.y) * mix };
-  });
-}
-
-function scoreAgainstTarget(sample: Sample, target: Sample) {
-  const pairedCount = Math.min(sample.strokes.length, target.strokes.length);
-  const distances: number[] = [];
-  for (let index = 0; index < pairedCount; index += 1) {
-    const attemptPoints = resampleStroke(sample.strokes[index]);
-    const targetPoints = resampleStroke(target.strokes[index]);
-    attemptPoints.forEach((point, pointIndex) => {
-      const targetPoint = targetPoints[pointIndex];
-      if (targetPoint) distances.push(Math.hypot(point.x - targetPoint.x, point.y - targetPoint.y));
-    });
-  }
-  const shapeDistance = distances.length ? mean(distances) : 0.4;
-  const strokePenalty =
-    Math.abs(sample.strokes.length - target.strokes.length) / Math.max(target.strokes.length, 1);
-  const sampleMetric = measureSample(sample);
-  const targetMetric = measureSample(target);
-  const proportionPenalty =
-    Math.abs(sampleMetric.width - targetMetric.width) + Math.abs(sampleMetric.height - targetMetric.height);
-  return Math.round(clamp(100 - shapeDistance * 360 - strokePenalty * 34 - proportionPenalty * 42, 38, 99));
+function scoreAgainstReconstructedText(sample: Sample, source: Sample, prompt: string, styleKey: BeautyStyleKey, identity: number) {
+  const width = 320;
+  const height = 112;
+  const targetCanvas = document.createElement("canvas");
+  const sampleCanvas = document.createElement("canvas");
+  targetCanvas.width = sampleCanvas.width = width;
+  targetCanvas.height = sampleCanvas.height = height;
+  const targetContext = targetCanvas.getContext("2d");
+  const sampleContext = sampleCanvas.getContext("2d");
+  if (!targetContext || !sampleContext) return 38;
+  drawReconstructedText(targetContext, source, prompt, width, height, styleKey, identity, { color: "#000" });
+  sample.strokes.forEach((stroke) =>
+    drawStroke(sampleContext, stroke, width, height, { color: "#000", lineWidth: 2.8 }),
+  );
+  const targetData = targetContext.getImageData(0, 0, width, height).data;
+  const sampleData = sampleContext.getImageData(0, 0, width, height).data;
+  const precision = maskCoverage(sampleData, targetData, width, height, 4);
+  const recall = maskCoverage(targetData, sampleData, width, height, 4);
+  const similarity = (2 * precision * recall) / Math.max(precision + recall, 0.001);
+  return Math.round(clamp(38 + similarity * 61, 38, 99));
 }
 
 const OVERLAY_COLORS = ["#ed735f", "#5aa985", "#17233b"];
@@ -931,6 +885,63 @@ function SampleCanvas({
   return <canvas ref={canvasRef} className={className} aria-label={ariaLabel} />;
 }
 
+function ReconstructedTextCanvas({
+  source,
+  prompt,
+  styleKey,
+  identity,
+  underlay = false,
+  className,
+  ariaLabel,
+  color = "#ed735f",
+  alpha = 1,
+}: {
+  source: Sample;
+  prompt: string;
+  styleKey: BeautyStyleKey;
+  identity: number;
+  underlay?: boolean;
+  className?: string;
+  ariaLabel: string;
+  color?: string;
+  alpha?: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(ratio, ratio);
+    if (underlay) {
+      source.strokes.forEach((stroke) =>
+        drawStroke(ctx, stroke, rect.width, rect.height, { color: "#8d8f8b", alpha: 0.18, lineWidth: 3.8 }),
+      );
+    }
+    drawReconstructedText(ctx, source, prompt, rect.width, rect.height, styleKey, identity, { color, alpha });
+  }, [alpha, color, identity, prompt, source, styleKey, underlay]);
+
+  useEffect(() => {
+    render();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(render);
+    observer.observe(canvas);
+    document.fonts
+      .load(`400 48px "${BEAUTY_STYLES[styleKey].fontFamily}"`, prompt)
+      .then(() => render())
+      .catch(() => undefined);
+    return () => observer.disconnect();
+  }, [prompt, render, styleKey]);
+
+  return <canvas ref={canvasRef} className={className} aria-label={ariaLabel} />;
+}
+
 function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -1002,14 +1013,7 @@ export default function Home() {
         : [],
     [characterSamples, characterSummary],
   );
-  const beautifiedSample = useMemo(
-    () => (samples[2] ? beautifySample(samples[2], beautyStyle, beautyIdentity, prompt) : null),
-    [beautyIdentity, beautyStyle, prompt, samples],
-  );
-  const beautyCorrectionDistance = useMemo(
-    () => (samples[2] && beautifiedSample ? measureCorrectionDistance(samples[2], beautifiedSample) : 0),
-    [beautifiedSample, samples],
-  );
+  const beautySourceSample = samples[2] ?? null;
   const isDrawingPhase =
     phase === "write" || phase === "practice" || phase === "character-practice" || phase === "beauty-practice";
 
@@ -1229,10 +1233,17 @@ export default function Home() {
     setPhase("beauty-practice");
   };
 
-  const submitBeautyPractice = () => {
-    if (!hasEnoughInk || !beautifiedSample) return;
+  const submitBeautyPractice = async () => {
+    if (!hasEnoughInk || !beautySourceSample) return;
+    try {
+      await document.fonts.load(`400 48px "${BEAUTY_STYLES[beautyStyle].fontFamily}"`, prompt);
+    } catch {
+      // 시스템 한글 글꼴로도 동일한 구조 비교가 가능해요.
+    }
     const practiceSample: Sample = { strokes, pointerType: inputMode ?? "unknown" };
-    setBeautyPracticeScore(scoreAgainstTarget(practiceSample, beautifiedSample));
+    setBeautyPracticeScore(
+      scoreAgainstReconstructedText(practiceSample, beautySourceSample, prompt, beautyStyle, beautyIdentity),
+    );
     resetCanvas();
     setPhase("beautify");
   };
@@ -1420,21 +1431,28 @@ export default function Home() {
         </section>
       )}
 
-      {phase === "beautify" && beautifiedSample && samples[2] && (
+      {phase === "beautify" && beautySourceSample && (
         <section className="workspace-card beauty-studio-card">
           <div className="beauty-studio-heading">
             <div>
               <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
-              <h2>내 글씨의 예쁜 가능성을 만들었어요</h2>
-              <p>폰트로 바꾸지 않고, 내가 쓴 획의 {beautyIdentity}%는 남긴 채 글자별 기준선·높이·간격과 획의 모양을 함께 다듬어요.</p>
+              <h2>읽을 수 있는 ‘예쁜 내 글씨’를 만들었어요</h2>
+              <p>획을 억지로 변형하지 않고, 연습 문장의 정확한 한글 골격에 내 글씨의 크기·기울기·간격 특징을 섞었어요.</p>
             </div>
             <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
+          </div>
+
+          <div className="recognized-text-status">
+            <span aria-hidden="true">✓</span>
+            <div><strong>문장 확인 완료</strong><p>글씨 모양을 추측하지 않고, 처음 제시한 연습 문장을 그대로 재구성해 글자가 깨지지 않아요.</p></div>
+            <b>{prompt}</b>
+            <small>API 비용 0원 · 이미지 전송 없음</small>
           </div>
 
           <div className="beauty-style-section">
             <div className="beauty-section-title">
               <span>1. 원하는 느낌 선택</span>
-              <small>스타일을 바꿔도 원래 획순과 글씨의 중심은 유지돼요</small>
+              <small>세 스타일 모두 정확한 한글 자모 구조를 유지해요</small>
             </div>
             <div className="beauty-style-grid">
               {(Object.entries(BEAUTY_STYLES) as [BeautyStyleKey, (typeof BEAUTY_STYLES)[BeautyStyleKey]][]).map(([key, style]) => (
@@ -1447,7 +1465,7 @@ export default function Home() {
                   }}
                   key={key}
                 >
-                  <span className="beauty-style-mark" aria-hidden="true">{style.mark}</span>
+                  <span className="beauty-style-mark" style={{ fontFamily: style.fontFamily }} aria-hidden="true">{style.mark}</span>
                   <span><b>{style.name}</b><small>{style.english}</small><em>{style.description}</em></span>
                   <i aria-hidden="true">{beautyStyle === key ? "✓" : ""}</i>
                 </button>
@@ -1458,7 +1476,7 @@ export default function Home() {
           <div className="beauty-identity-control">
             <div>
               <span>2. 내 글씨다움</span>
-              <strong>{beautyIdentity}% 유지 · {beautyIdentity <= 55 ? "확실한 교정" : beautyIdentity <= 70 ? "균형 교정" : "섬세한 교정"}</strong>
+              <strong>{beautyIdentity}% 반영 · {beautyIdentity <= 55 ? "골격 우선" : beautyIdentity <= 70 ? "균형 조합" : "내 특징 우선"}</strong>
             </div>
             <input
               type="range"
@@ -1473,7 +1491,7 @@ export default function Home() {
               }}
               style={{ "--identity": `${((beautyIdentity - 40) / 50) * 100}%` } as React.CSSProperties}
             />
-            <div className="beauty-identity-labels"><span>확실하게 교정</span><span>원래 필체 유지</span></div>
+            <div className="beauty-identity-labels"><span>정확한 골격 우선</span><span>내 필체 특징 우선</span></div>
           </div>
 
           <div className="beauty-preview-grid">
@@ -1483,13 +1501,16 @@ export default function Home() {
                 <SampleCanvas sample={samples[2]} ariaLabel="사용자가 쓴 원본 글씨" />
               </div>
             </div>
-            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>AI<br />STYLING</b></div>
+            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>GLYPH<br />REBUILD</b></div>
             <div className="beauty-preview-card after">
-              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">평균 {beautyCorrectionDistance}px 보정</em></div>
+              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">한글 골격 재구성</em></div>
               <div className="beauty-preview-paper">
-                <SampleCanvas
-                  sample={beautifiedSample}
-                  underlay={samples[2]}
+                <ReconstructedTextCanvas
+                  source={beautySourceSample}
+                  prompt={prompt}
+                  styleKey={beautyStyle}
+                  identity={beautyIdentity}
+                  underlay
                   color="#ed735f"
                   ariaLabel={`${BEAUTY_STYLES[beautyStyle].name}로 교정된 글씨`}
                 />
@@ -1500,7 +1521,7 @@ export default function Home() {
           <div className="beauty-change-row">
             <span>이번 보정</span>
             {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
-            <small>회색 선은 원본, 산호색 선은 교정된 획이에요</small>
+            <small>회색 선은 원본, 산호색 글자는 정확한 문장 골격이에요</small>
           </div>
 
           {beautyPracticeScore !== null && (
@@ -1523,7 +1544,7 @@ export default function Home() {
         </section>
       )}
 
-      {phase === "beauty-practice" && beautifiedSample && (
+      {phase === "beauty-practice" && beautySourceSample && (
         <section className="workspace-card writing-card beauty-trace-card">
           <div className="card-heading">
             <div>
@@ -1548,8 +1569,11 @@ export default function Home() {
               <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Trace guide"}</span>
               <span>산호색은 가이드 · 진한 남색은 지금 쓰는 획</span>
             </div>
-            <SampleCanvas
-              sample={beautifiedSample}
+            <ReconstructedTextCanvas
+              source={beautySourceSample}
+              prompt={prompt}
+              styleKey={beautyStyle}
+              identity={beautyIdentity}
               className="beauty-guide-canvas"
               color="#ed735f"
               alpha={0.28}

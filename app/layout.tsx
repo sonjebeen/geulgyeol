@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import "@fontsource/gowun-dodum/korean-400.css";
+import "@fontsource/jua/korean-400.css";
+import "@fontsource/nanum-pen-script/korean-400.css";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
