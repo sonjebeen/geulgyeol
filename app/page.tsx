@@ -76,6 +76,33 @@ type Feedback = {
 
 type BeautyStyleKey = "neat" | "round" | "flow";
 
+type CharacterIssueKey = "size" | "baseline" | "spacing" | "speed" | "stroke";
+
+type CharacterCellMetric = {
+  sample: Sample;
+  empty: boolean;
+  size: number;
+  width: number;
+  height: number;
+  baseline: number;
+  center: number;
+  speed: number;
+  strokeCount: number;
+};
+
+type CharacterDiagnosis = {
+  character: string;
+  promptIndex: number;
+  score: number;
+  status: "good" | "watch" | "focus";
+  issueKey: CharacterIssueKey;
+  issueLabel: string;
+  finding: string;
+  tip: string;
+  attemptScores: number[];
+  samples: Sample[];
+};
+
 const PROMPTS = [
   "오늘의 마음을 천천히 기록합니다.",
   "작은 습관이 좋은 하루를 만듭니다.",
@@ -150,6 +177,37 @@ const FOCUS_COPY: Record<
     reason: "글자의 개성은 유지되고 있지만 문장 전체의 중심선이 조금 흔들리고 있어요.",
     tip: "시작점과 끝점의 높이를 먼저 정한 뒤 그 사이를 채운다고 생각해 보세요.",
     exercise: ["가지런", "균형", "한결"],
+  },
+};
+
+const CHARACTER_ISSUE_COPY: Record<
+  CharacterIssueKey,
+  { label: string; finding: (character: string) => string; tip: string }
+> = {
+  size: {
+    label: "크기 균형",
+    finding: (character) => `‘${character}’의 높이와 너비가 쓸 때마다 달라져요.`,
+    tip: "네모 칸의 위아래 여백을 먼저 정한 뒤 그 안을 채운다는 느낌으로 써 보세요.",
+  },
+  baseline: {
+    label: "기준선",
+    finding: (character) => `‘${character}’가 문장의 기준선 위아래로 흔들려요.`,
+    tip: "받침이나 마지막 획이 끝나는 높이를 옆 글자와 나란히 맞춰 보세요.",
+  },
+  spacing: {
+    label: "중심 위치",
+    finding: (character) => `‘${character}’의 중심이 칸 안에서 좌우로 이동해요.`,
+    tip: "첫 획을 칸의 가운데에서 시작하고 좌우 여백을 비슷하게 남겨 보세요.",
+  },
+  speed: {
+    label: "쓰기 속도",
+    finding: (character) => `‘${character}’에서 펜 속도가 가장 많이 달라져요.`,
+    tip: "빠르게 끝내려 하지 말고 첫 획의 속도를 마지막 획까지 유지해 보세요.",
+  },
+  stroke: {
+    label: "획 나눔",
+    finding: (character) => `‘${character}’를 나누어 쓰는 방식이 매번 달라요.`,
+    tip: "자음과 모음을 같은 순서, 같은 획 수로 또박또박 나누어 써 보세요.",
   },
 };
 
@@ -683,6 +741,139 @@ function getHangulCharacters(prompt: string, preferred?: string) {
   return Array.from(new Set([...(preferredCharacter ? [preferredCharacter] : []), ...characters])).slice(0, 18);
 }
 
+function standardDeviation(values: number[]) {
+  if (!values.length) return 0;
+  const average = mean(values);
+  return Math.sqrt(mean(values.map((value) => (value - average) ** 2)));
+}
+
+function splitSampleIntoPromptCells(sample: Sample, prompt: string): CharacterCellMetric[] {
+  const units = getPromptUnits(prompt);
+  const totalUnits = units.reduce((sum, unit) => sum + unit.width, 0);
+  const bounds = getSampleBounds(sample);
+  const sampleHeight = Math.max(bounds.height, 0.08);
+  let cursor = 0;
+
+  return units.map((unit) => {
+    const cellStart = bounds.minX + (cursor / Math.max(totalUnits, 1)) * bounds.width;
+    cursor += unit.width;
+    const cellEnd = bounds.minX + (cursor / Math.max(totalUnits, 1)) * bounds.width;
+    const cellWidth = Math.max(cellEnd - cellStart, 0.015);
+    const matchingStrokes = sample.strokes.filter((stroke) => {
+      if (!stroke.points.length) return false;
+      const centerX = mean(stroke.points.map((point) => point.x));
+      return centerX >= cellStart && centerX < cellEnd;
+    });
+    const points = matchingStrokes.flatMap((stroke) => stroke.points);
+    const localSample: Sample = {
+      pointerType: sample.pointerType,
+      strokes: matchingStrokes.map((stroke) => ({
+        ...stroke,
+        points: stroke.points.map((point) => ({
+          ...point,
+          x: clamp((point.x - cellStart) / cellWidth, 0, 1),
+          y: clamp(0.1 + ((point.y - bounds.minY) / sampleHeight) * 0.8, 0.04, 0.96),
+        })),
+      })),
+    };
+
+    if (!points.length) {
+      return {
+        sample: localSample,
+        empty: true,
+        size: 0,
+        width: 0,
+        height: 0,
+        baseline: 0.5,
+        center: 0.5,
+        speed: 0,
+        strokeCount: 0,
+      };
+    }
+
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const width = (Math.max(...xs) - Math.min(...xs)) / cellWidth;
+    const height = (Math.max(...ys) - Math.min(...ys)) / sampleHeight;
+    const center = clamp((mean(xs) - cellStart) / cellWidth, 0, 1);
+    const baseline = clamp((Math.max(...ys) - bounds.minY) / sampleHeight, 0, 1);
+    const localMetric = measureSample(localSample);
+
+    return {
+      sample: localSample,
+      empty: false,
+      size: Math.sqrt(Math.max(width * height, 0.0001)),
+      width,
+      height,
+      baseline,
+      center,
+      speed: localMetric.speed,
+      strokeCount: matchingStrokes.length,
+    };
+  });
+}
+
+function scoreCharacterAttempt(metric: CharacterCellMetric, target: CharacterCellMetric) {
+  if (metric.empty) return 38;
+  const deviations = [
+    Math.abs(metric.size - target.size) / Math.max(target.size, 0.08),
+    Math.abs(metric.baseline - target.baseline) * 2.2,
+    Math.abs(metric.center - target.center) * 1.8,
+    (Math.abs(metric.speed - target.speed) / Math.max(target.speed, 0.04)) * 0.62,
+    (Math.abs(metric.strokeCount - target.strokeCount) / Math.max(target.strokeCount, 1)) * 0.72,
+  ];
+  return Math.round(clamp(98 - mean(deviations.map((value) => Math.min(value, 1))) * 72, 38, 98));
+}
+
+function analyzePromptCharacters(samples: Sample[], prompt: string): CharacterDiagnosis[] {
+  if (samples.length < 3) return [];
+  const cellsBySample = samples.map((sample) => splitSampleIntoPromptCells(sample, prompt));
+  const promptCharacters = Array.from(prompt);
+
+  return promptCharacters.flatMap((character, promptIndex) => {
+    if (!/[가-힣]/.test(character)) return [];
+    const metrics = cellsBySample.map((cells) => cells[promptIndex]);
+    const populated = metrics.filter((metric) => !metric.empty);
+    const missingRatio = (metrics.length - populated.length) / metrics.length;
+    const issueScores: Record<CharacterIssueKey, number> = {
+      size: clamp(coefficientOfVariation(populated.map((metric) => metric.size)) + missingRatio * 0.8, 0, 1),
+      baseline: clamp(standardDeviation(populated.map((metric) => metric.baseline)) * 5 + missingRatio * 0.8, 0, 1),
+      spacing: clamp(standardDeviation(populated.map((metric) => metric.center)) * 4 + missingRatio * 0.8, 0, 1),
+      speed: clamp(coefficientOfVariation(populated.map((metric) => metric.speed)) * 0.82 + missingRatio * 0.8, 0, 1),
+      stroke: clamp(coefficientOfVariation(populated.map((metric) => metric.strokeCount)) * 0.9 + missingRatio * 0.8, 0, 1),
+    };
+    const issueKey = (Object.entries(issueScores).sort((a, b) => b[1] - a[1])[0]?.[0] ??
+      "size") as CharacterIssueKey;
+    const averageIssue = mean(Object.values(issueScores));
+    const score = Math.round(clamp(97 - issueScores[issueKey] * 64 - averageIssue * 26, 39, 97));
+    const target: CharacterCellMetric = {
+      sample: populated[0]?.sample ?? { strokes: [], pointerType: "unknown" },
+      empty: false,
+      size: mean(populated.map((metric) => metric.size)),
+      width: mean(populated.map((metric) => metric.width)),
+      height: mean(populated.map((metric) => metric.height)),
+      baseline: mean(populated.map((metric) => metric.baseline)),
+      center: mean(populated.map((metric) => metric.center)),
+      speed: mean(populated.map((metric) => metric.speed)),
+      strokeCount: mean(populated.map((metric) => metric.strokeCount)),
+    };
+    const copy = CHARACTER_ISSUE_COPY[issueKey];
+
+    return [{
+      character,
+      promptIndex,
+      score,
+      status: score < 66 ? "focus" : score < 83 ? "watch" : "good",
+      issueKey,
+      issueLabel: copy.label,
+      finding: copy.finding(character),
+      tip: copy.tip,
+      attemptScores: metrics.map((metric) => scoreCharacterAttempt(metric, target)),
+      samples: metrics.map((metric) => metric.sample),
+    }];
+  });
+}
+
 function drawSpeedHeatmap(
   ctx: CanvasRenderingContext2D,
   sample: Sample,
@@ -966,6 +1157,35 @@ function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
   );
 }
 
+function CharacterCropThumbnail({ sample, label }: { sample: Sample; label: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, rect.width * ratio);
+    canvas.height = Math.max(1, rect.height * ratio);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(ratio, ratio);
+    sample.strokes.forEach((stroke) =>
+      drawStroke(ctx, stroke, rect.width, rect.height, {
+        color: "#17233b",
+        lineWidth: stroke.pointerType === "pen" ? 3 : 3.8,
+      }),
+    );
+  }, [sample]);
+
+  return (
+    <div className="character-crop-thumb">
+      <span>{label}</span>
+      <canvas ref={canvasRef} aria-label={`${label} 글자 획`} />
+    </div>
+  );
+}
+
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<Stroke[]>([]);
@@ -996,6 +1216,7 @@ export default function Home() {
   const [beautyStyle, setBeautyStyle] = useState<BeautyStyleKey>("neat");
   const [beautyIdentity, setBeautyIdentity] = useState(58);
   const [beautyPracticeScore, setBeautyPracticeScore] = useState<number | null>(null);
+  const [selectedDiagnosisIndex, setSelectedDiagnosisIndex] = useState(0);
 
   const sampleNumber = samples.length + 1;
   const hasEnoughInk = useMemo(
@@ -1014,6 +1235,11 @@ export default function Home() {
     [characterSamples, characterSummary],
   );
   const beautySourceSample = samples[2] ?? null;
+  const characterDiagnoses = useMemo(
+    () => analyzePromptCharacters(samples, prompt),
+    [samples, prompt],
+  );
+  const selectedDiagnosis = characterDiagnoses[selectedDiagnosisIndex] ?? characterDiagnoses[0] ?? null;
   const isDrawingPhase =
     phase === "write" || phase === "practice" || phase === "character-practice" || phase === "beauty-practice";
 
@@ -1120,9 +1346,15 @@ export default function Home() {
 
     const nextSummary = analyzeSamples(nextSamples);
     const fallback = buildFallbackFeedback(nextSummary);
+    const nextDiagnoses = analyzePromptCharacters(nextSamples, prompt);
+    const weakestDiagnosisIndex = nextDiagnoses.reduce(
+      (weakest, diagnosis, index, all) => diagnosis.score < all[weakest].score ? index : weakest,
+      0,
+    );
     setSamples(nextSamples);
     setSummary(nextSummary);
     setFeedback(fallback);
+    setSelectedDiagnosisIndex(weakestDiagnosisIndex);
     setPhase("analyzing");
     resetCanvas();
 
@@ -1159,6 +1391,7 @@ export default function Home() {
     setBeautyStyle("neat");
     setBeautyIdentity(58);
     setBeautyPracticeScore(null);
+    setSelectedDiagnosisIndex(0);
     setAnalysisMode("local");
     setInputMode(null);
     resetCanvas();
@@ -1181,10 +1414,11 @@ export default function Home() {
     setPhase("result");
   };
 
-  const startCharacterPractice = () => {
+  const startCharacterPractice = (requestedCharacter?: string) => {
     const character =
-      Array.from(feedback?.characterTarget ?? "").find((item) => /[가-힣]/.test(item)) ??
-      practiceCharacters[0] ??
+      (requestedCharacter && /[가-힣]/.test(requestedCharacter) ? requestedCharacter : "") ||
+      Array.from(feedback?.characterTarget ?? "").find((item) => /[가-힣]/.test(item)) ||
+      practiceCharacters[0] ||
       "가";
     setSelectedCharacter(character);
     setCharacterSamples([]);
@@ -1276,7 +1510,7 @@ export default function Home() {
       </section>
 
       <nav className="stepper" aria-label="분석 진행 단계">
-        {["3번 쓰기", "움직임 분석", "한 가지 교정"].map((label, index) => {
+        {["3번 쓰기", "움직임 분석", "글자별 교정"].map((label, index) => {
           const activeIndex = phase === "write" ? 0 : phase === "analyzing" ? 1 : 2;
           return (
             <div className={index <= activeIndex ? "step active" : "step"} key={label}>
@@ -1366,9 +1600,9 @@ export default function Home() {
           </div>
           <p className="section-kicker">MOTION ANALYSIS</p>
           <h2>세 번의 움직임을 겹쳐 보고 있어요</h2>
-          <p>글자 크기, 쓰는 속도, 획의 리듬 중 가장 많이 흔들리는 한 가지를 찾습니다.</p>
+          <p>문장을 글자 단위로 나누고, 크기·위치·속도·획의 리듬이 가장 흔들리는 곳을 찾습니다.</p>
           <div className="scan-list">
-            <span>크기 일관성</span><span>속도 변화</span><span>획 리듬</span><span>문장 균형</span>
+            <span>글자 위치 매칭</span><span>크기 일관성</span><span>속도 변화</span><span>획 리듬</span>
           </div>
         </section>
       )}
@@ -1782,6 +2016,79 @@ export default function Home() {
               variation={summary.variations[summary.focusKey]}
             />
 
+            {selectedDiagnosis && (
+              <div className="character-map-panel">
+                <div className="character-map-heading">
+                  <div>
+                    <p className="section-kicker">CHARACTER MAP</p>
+                    <h3>문장 해부도</h3>
+                  </div>
+                  <span><i aria-hidden="true" /> 제시 문장 기반 획 매칭 · API 0원</span>
+                </div>
+
+                <div className="sentence-character-map" aria-label="글자별 안정성 지도">
+                  {Array.from(prompt).map((character, promptIndex) => {
+                    const diagnosisIndex = characterDiagnoses.findIndex((item) => item.promptIndex === promptIndex);
+                    const diagnosis = characterDiagnoses[diagnosisIndex];
+                    if (/\s/.test(character)) return <span className="character-map-space" key={promptIndex} aria-hidden="true" />;
+                    if (!diagnosis) return <span className="character-map-punctuation" key={promptIndex}>{character}</span>;
+                    return (
+                      <button
+                        className={`character-map-cell ${diagnosis.status} ${selectedDiagnosisIndex === diagnosisIndex ? "selected" : ""}`}
+                        type="button"
+                        key={promptIndex}
+                        onClick={() => setSelectedDiagnosisIndex(diagnosisIndex)}
+                        aria-pressed={selectedDiagnosisIndex === diagnosisIndex}
+                        aria-label={`${character}, 안정성 ${diagnosis.score}점, ${diagnosis.issueLabel}`}
+                      >
+                        <strong>{character}</strong>
+                        <small>{diagnosis.score}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="character-detail-card" aria-live="polite">
+                  <div className={`character-detail-mark ${selectedDiagnosis.status}`}>
+                    <strong>{selectedDiagnosis.character}</strong>
+                    <span>{selectedDiagnosis.score}점</span>
+                  </div>
+                  <div className="character-detail-copy">
+                    <span>집중 포인트 · {selectedDiagnosis.issueLabel}</span>
+                    <h4>{selectedDiagnosis.finding}</h4>
+                    <p>{selectedDiagnosis.tip}</p>
+                    <div className="character-attempt-row">
+                      {selectedDiagnosis.samples.map((sample, index) => (
+                        <div className="character-attempt" key={index}>
+                          <CharacterCropThumbnail sample={sample} label={`${index + 1}회`} />
+                          <div>
+                            <span>{index + 1}번째</span>
+                            <strong>{selectedDiagnosis.attemptScores[index]}<small>점</small></strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="character-detail-action">
+                    <span className={selectedDiagnosis.attemptScores[2] >= selectedDiagnosis.attemptScores[0] ? "up" : ""}>
+                      1→3회 {selectedDiagnosis.attemptScores[2] >= selectedDiagnosis.attemptScores[0] ? "+" : ""}
+                      {selectedDiagnosis.attemptScores[2] - selectedDiagnosis.attemptScores[0]}점
+                    </span>
+                    <button type="button" onClick={() => startCharacterPractice(selectedDiagnosis.character)}>
+                      이 글자 집중 교정 <b aria-hidden="true">→</b>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="character-map-legend" aria-hidden="true">
+                  <span><i className="good" />안정</span>
+                  <span><i className="watch" />관찰</span>
+                  <span><i className="focus" />집중</span>
+                  <b>글자를 눌러 3회 변화를 확인하세요</b>
+                </div>
+              </div>
+            )}
+
             {afterSample && afterScore !== null && (
               <div className="improvement-panel">
                 <div className="improvement-heading">
@@ -1856,8 +2163,8 @@ export default function Home() {
               </div>
             ) : (
               <div className="character-insight-card pending">
-                <span className="vision-mark" aria-hidden="true">AI</span>
-                <div><strong>문제 글자 직접 지목 준비 완료</strong><p>GPT-5.6 API를 연결하면 세 글씨를 보고 가장 불안정한 글자와 근거를 표시해요.</p></div>
+                <span className="vision-mark" aria-hidden="true">ON</span>
+                <div><strong>기기 안에서 글자별 매칭 완료</strong><p>제시 문장과 획의 위치를 맞춰 가장 흔들린 글자를 찾았어요. 이미지와 개인정보는 전송하지 않아요.</p></div>
               </div>
             )}
             <div className="coach-tip">
@@ -1874,7 +2181,7 @@ export default function Home() {
               <span><strong>내 글씨 예쁘게 만들기</strong><small>나다움은 남기고 획의 흔들림만 정돈해요</small></span>
               <b aria-hidden="true">→</b>
             </button>
-            <button className="character-lab-button" type="button" onClick={startCharacterPractice}>
+            <button className="character-lab-button" type="button" onClick={() => startCharacterPractice(selectedDiagnosis?.character)}>
               <span aria-hidden="true">{practiceCharacters[0] ?? "가"}</span>
               <span><strong>한 글자 집중 연습실</strong><small>획순 번호와 속도 히트맵 보기</small></span>
               <b aria-hidden="true">→</b>

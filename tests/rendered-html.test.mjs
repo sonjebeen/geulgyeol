@@ -65,6 +65,16 @@ test("includes focused character practice and motion heatmap controls", async ()
   assert.match(source, /drawSpeedHeatmap/);
 });
 
+test("includes the local character map and direct correction path", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /문장 해부도/);
+  assert.match(source, /제시 문장 기반 획 매칭 · API 0원/);
+  assert.match(source, /analyzePromptCharacters/);
+  assert.match(source, /splitSampleIntoPromptCells/);
+  assert.match(source, /이 글자 집중 교정/);
+  assert.match(source, /1→3회/);
+});
+
 test("includes personal handwriting beautification and tracing", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
