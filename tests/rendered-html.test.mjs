@@ -64,3 +64,14 @@ test("includes focused character practice and motion heatmap controls", async ()
   assert.match(source, /획순 재생/);
   assert.match(source, /drawSpeedHeatmap/);
 });
+
+test("includes personal handwriting beautification and tracing", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /내 글씨 예쁘게 만들기/);
+  assert.match(source, /단정한 정리체/);
+  assert.match(source, /둥근 온기체/);
+  assert.match(source, /가벼운 흐름체/);
+  assert.match(source, /beautifySample/);
+  assert.match(source, /scoreAgainstTarget/);
+  assert.match(source, /가이드 유사도 확인/);
+});

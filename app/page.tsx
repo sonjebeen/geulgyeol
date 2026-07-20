@@ -74,11 +74,40 @@ type Feedback = {
   characterConfidence: "high" | "medium" | "low";
 };
 
+type BeautyStyleKey = "neat" | "round" | "flow";
+
 const PROMPTS = [
   "오늘의 마음을 천천히 기록합니다.",
   "작은 습관이 좋은 하루를 만듭니다.",
   "나만의 속도로 또박또박 써 내려갑니다.",
 ];
+
+const BEAUTY_STYLES: Record<
+  BeautyStyleKey,
+  { name: string; english: string; description: string; changes: string[]; mark: string }
+> = {
+  neat: {
+    name: "단정한 정리체",
+    english: "NEAT",
+    description: "획의 떨림을 줄이고 높이와 중심을 차분하게 정돈해요.",
+    changes: ["미세 떨림 완화", "높이 균형", "또렷한 마무리"],
+    mark: "가",
+  },
+  round: {
+    name: "둥근 온기체",
+    english: "ROUND",
+    description: "원래 필체의 곡선을 살리면서 모서리를 부드럽게 만들어요.",
+    changes: ["곡선 강조", "부드러운 연결", "편안한 인상"],
+    mark: "동",
+  },
+  flow: {
+    name: "가벼운 흐름체",
+    english: "FLOW",
+    description: "쓰는 방향을 자연스럽게 이어 빠르고 감성적인 리듬을 만들어요.",
+    changes: ["오른쪽 흐름", "획 연결감", "가벼운 리듬"],
+    mark: "결",
+  },
+};
 
 const FOCUS_COPY: Record<
   AnalysisSummary["focusKey"],
@@ -390,6 +419,89 @@ function scorePracticeSample(sample: Sample, summary: AnalysisSummary) {
   return Math.round(clamp(97 - focused * 48 - overall * 30, 42, 98));
 }
 
+function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: number): Sample {
+  const allPoints = sample.strokes.flatMap((stroke) => stroke.points);
+  if (!allPoints.length) return sample;
+  const minX = Math.min(...allPoints.map((point) => point.x));
+  const maxX = Math.max(...allPoints.map((point) => point.x));
+  const minY = Math.min(...allPoints.map((point) => point.y));
+  const maxY = Math.max(...allPoints.map((point) => point.y));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const strength = clamp((100 - identity) / 45, 0.18, 1);
+  const style = {
+    neat: { smoothing: 0.58, width: 1.012, height: 0.96, shear: 0, curve: -0.08 },
+    round: { smoothing: 0.68, width: 1.018, height: 1.045, shear: 0.012, curve: 0.24 },
+    flow: { smoothing: 0.48, width: 1.035, height: 0.97, shear: -0.075, curve: 0.08 },
+  }[styleKey];
+
+  return {
+    ...sample,
+    strokes: sample.strokes.map((stroke) => {
+      const first = stroke.points[0];
+      const last = stroke.points[stroke.points.length - 1] ?? first;
+      return {
+        ...stroke,
+        points: stroke.points.map((point, index, points) => {
+          const from = Math.max(0, index - 2);
+          const to = Math.min(points.length - 1, index + 2);
+          const neighbors = points.slice(from, to + 1);
+          const localX = mean(neighbors.map((item) => item.x));
+          const localY = mean(neighbors.map((item) => item.y));
+          const smoothX = point.x + (localX - point.x) * style.smoothing;
+          const smoothY = point.y + (localY - point.y) * style.smoothing;
+          const progress = points.length > 1 ? index / (points.length - 1) : 0;
+          const chordX = first.x + (last.x - first.x) * progress;
+          const chordY = first.y + (last.y - first.y) * progress;
+          const curvedX = chordX + (smoothX - chordX) * (1 + style.curve);
+          const curvedY = chordY + (smoothY - chordY) * (1 + style.curve);
+          const styledX = centerX + (curvedX - centerX) * style.width + (curvedY - centerY) * style.shear;
+          const styledY = centerY + (curvedY - centerY) * style.height;
+          return {
+            ...point,
+            x: clamp(point.x + (styledX - point.x) * strength, 0.015, 0.985),
+            y: clamp(point.y + (styledY - point.y) * strength, 0.025, 0.975),
+          };
+        }),
+      };
+    }),
+  };
+}
+
+function resampleStroke(stroke: Stroke, count = 14) {
+  if (!stroke.points.length) return [];
+  return Array.from({ length: count }, (_, index) => {
+    const position = (index / Math.max(count - 1, 1)) * (stroke.points.length - 1);
+    const lower = Math.floor(position);
+    const upper = Math.min(stroke.points.length - 1, Math.ceil(position));
+    const mix = position - lower;
+    const a = stroke.points[lower];
+    const b = stroke.points[upper];
+    return { x: a.x + (b.x - a.x) * mix, y: a.y + (b.y - a.y) * mix };
+  });
+}
+
+function scoreAgainstTarget(sample: Sample, target: Sample) {
+  const pairedCount = Math.min(sample.strokes.length, target.strokes.length);
+  const distances: number[] = [];
+  for (let index = 0; index < pairedCount; index += 1) {
+    const attemptPoints = resampleStroke(sample.strokes[index]);
+    const targetPoints = resampleStroke(target.strokes[index]);
+    attemptPoints.forEach((point, pointIndex) => {
+      const targetPoint = targetPoints[pointIndex];
+      if (targetPoint) distances.push(Math.hypot(point.x - targetPoint.x, point.y - targetPoint.y));
+    });
+  }
+  const shapeDistance = distances.length ? mean(distances) : 0.4;
+  const strokePenalty =
+    Math.abs(sample.strokes.length - target.strokes.length) / Math.max(target.strokes.length, 1);
+  const sampleMetric = measureSample(sample);
+  const targetMetric = measureSample(target);
+  const proportionPenalty =
+    Math.abs(sampleMetric.width - targetMetric.width) + Math.abs(sampleMetric.height - targetMetric.height);
+  return Math.round(clamp(100 - shapeDistance * 360 - strokePenalty * 34 - proportionPenalty * 42, 38, 99));
+}
+
 const OVERLAY_COLORS = ["#ed735f", "#5aa985", "#17233b"];
 
 function StrokeOverlay({ samples, focusLabel, variation }: { samples: Sample[]; focusLabel: string; variation: number }) {
@@ -675,6 +787,53 @@ function CharacterHeatmap({ samples, character }: { samples: Sample[]; character
   );
 }
 
+function SampleCanvas({
+  sample,
+  underlay,
+  className,
+  ariaLabel,
+  color = "#17233b",
+  alpha = 1,
+}: {
+  sample: Sample;
+  underlay?: Sample;
+  className?: string;
+  ariaLabel: string;
+  color?: string;
+  alpha?: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(ratio, ratio);
+    underlay?.strokes.forEach((stroke) =>
+      drawStroke(ctx, stroke, rect.width, rect.height, { color: "#9b9b94", alpha: 0.24, lineWidth: 4 }),
+    );
+    sample.strokes.forEach((stroke) =>
+      drawStroke(ctx, stroke, rect.width, rect.height, { color, alpha, lineWidth: 4.2 }),
+    );
+  }, [alpha, color, sample, underlay]);
+
+  useEffect(() => {
+    render();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(render);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [render]);
+
+  return <canvas ref={canvasRef} className={className} aria-label={ariaLabel} />;
+}
+
 function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -708,7 +867,14 @@ export default function Home() {
   const [samples, setSamples] = useState<Sample[]>([]);
   const [prompt, setPrompt] = useState(PROMPTS[0]);
   const [phase, setPhase] = useState<
-    "write" | "analyzing" | "result" | "practice" | "character-practice" | "character-result"
+    | "write"
+    | "analyzing"
+    | "result"
+    | "practice"
+    | "character-practice"
+    | "character-result"
+    | "beautify"
+    | "beauty-practice"
   >("write");
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -719,6 +885,9 @@ export default function Home() {
   const [selectedCharacter, setSelectedCharacter] = useState("");
   const [characterSamples, setCharacterSamples] = useState<Sample[]>([]);
   const [characterSummary, setCharacterSummary] = useState<AnalysisSummary | null>(null);
+  const [beautyStyle, setBeautyStyle] = useState<BeautyStyleKey>("neat");
+  const [beautyIdentity, setBeautyIdentity] = useState(70);
+  const [beautyPracticeScore, setBeautyPracticeScore] = useState<number | null>(null);
 
   const sampleNumber = samples.length + 1;
   const hasEnoughInk = useMemo(
@@ -736,7 +905,12 @@ export default function Home() {
         : [],
     [characterSamples, characterSummary],
   );
-  const isDrawingPhase = phase === "write" || phase === "practice" || phase === "character-practice";
+  const beautifiedSample = useMemo(
+    () => (samples[2] ? beautifySample(samples[2], beautyStyle, beautyIdentity) : null),
+    [beautyIdentity, beautyStyle, samples],
+  );
+  const isDrawingPhase =
+    phase === "write" || phase === "practice" || phase === "character-practice" || phase === "beauty-practice";
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -877,6 +1051,9 @@ export default function Home() {
     setSelectedCharacter("");
     setCharacterSamples([]);
     setCharacterSummary(null);
+    setBeautyStyle("neat");
+    setBeautyIdentity(70);
+    setBeautyPracticeScore(null);
     setAnalysisMode("local");
     setInputMode(null);
     resetCanvas();
@@ -937,6 +1114,26 @@ export default function Home() {
     setCharacterSummary(null);
     resetCanvas();
     setPhase("character-practice");
+  };
+
+  const startBeautify = () => {
+    setBeautyPracticeScore(null);
+    resetCanvas();
+    setPhase("beautify");
+  };
+
+  const startBeautyPractice = () => {
+    setBeautyPracticeScore(null);
+    resetCanvas();
+    setPhase("beauty-practice");
+  };
+
+  const submitBeautyPractice = () => {
+    if (!hasEnoughInk || !beautifiedSample) return;
+    const practiceSample: Sample = { strokes, pointerType: inputMode ?? "unknown" };
+    setBeautyPracticeScore(scoreAgainstTarget(practiceSample, beautifiedSample));
+    resetCanvas();
+    setPhase("beautify");
   };
 
   return (
@@ -1119,6 +1316,169 @@ export default function Home() {
               교정 후 점수 확인 <span aria-hidden="true">→</span>
             </button>
           </div>
+        </section>
+      )}
+
+      {phase === "beautify" && beautifiedSample && samples[2] && (
+        <section className="workspace-card beauty-studio-card">
+          <div className="beauty-studio-heading">
+            <div>
+              <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
+              <h2>내 글씨의 예쁜 가능성을 만들었어요</h2>
+              <p>폰트로 바꾸지 않고, 내가 쓴 획의 70%는 남긴 채 흔들림과 리듬만 다듬어요.</p>
+            </div>
+            <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
+          </div>
+
+          <div className="beauty-style-section">
+            <div className="beauty-section-title">
+              <span>1. 원하는 느낌 선택</span>
+              <small>스타일을 바꿔도 원래 획순과 글씨의 중심은 유지돼요</small>
+            </div>
+            <div className="beauty-style-grid">
+              {(Object.entries(BEAUTY_STYLES) as [BeautyStyleKey, (typeof BEAUTY_STYLES)[BeautyStyleKey]][]).map(([key, style]) => (
+                <button
+                  className={beautyStyle === key ? "beauty-style-card selected" : "beauty-style-card"}
+                  type="button"
+                  onClick={() => {
+                    setBeautyStyle(key);
+                    setBeautyPracticeScore(null);
+                  }}
+                  key={key}
+                >
+                  <span className="beauty-style-mark" aria-hidden="true">{style.mark}</span>
+                  <span><b>{style.name}</b><small>{style.english}</small><em>{style.description}</em></span>
+                  <i aria-hidden="true">{beautyStyle === key ? "✓" : ""}</i>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="beauty-identity-control">
+            <div>
+              <span>2. 내 글씨다움</span>
+              <strong>{beautyIdentity}% 유지</strong>
+            </div>
+            <input
+              type="range"
+              min="55"
+              max="90"
+              step="1"
+              value={beautyIdentity}
+              aria-label="원래 필체 유지 비율"
+              onChange={(event) => {
+                setBeautyIdentity(Number(event.target.value));
+                setBeautyPracticeScore(null);
+              }}
+              style={{ "--identity": `${((beautyIdentity - 55) / 35) * 100}%` } as React.CSSProperties}
+            />
+            <div className="beauty-identity-labels"><span>더 많이 교정</span><span>원래 필체 유지</span></div>
+          </div>
+
+          <div className="beauty-preview-grid">
+            <div className="beauty-preview-card before">
+              <div><span>BEFORE</span><strong>내가 쓴 원본</strong></div>
+              <div className="beauty-preview-paper">
+                <SampleCanvas sample={samples[2]} ariaLabel="사용자가 쓴 원본 글씨" />
+              </div>
+            </div>
+            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>AI<br />STYLING</b></div>
+            <div className="beauty-preview-card after">
+              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong></div>
+              <div className="beauty-preview-paper">
+                <SampleCanvas
+                  sample={beautifiedSample}
+                  underlay={samples[2]}
+                  color="#ed735f"
+                  ariaLabel={`${BEAUTY_STYLES[beautyStyle].name}로 교정된 글씨`}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="beauty-change-row">
+            <span>이번 보정</span>
+            {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
+            <small>회색 선은 원본, 산호색 선은 교정된 획이에요</small>
+          </div>
+
+          {beautyPracticeScore !== null && (
+            <div className="beauty-practice-result" aria-live="polite">
+              <div className="beauty-match-score"><strong>{beautyPracticeScore}</strong><span>%<br />가이드 유사도</span></div>
+              <div>
+                <p className="section-kicker">TRACE RESULT</p>
+                <h3>{beautyPracticeScore >= 78 ? "교정된 리듬이 손에 잘 익었어요" : "모양보다 획의 흐름을 한 번 더 따라가 보세요"}</h3>
+                <p>{beautyPracticeScore >= 78 ? "원래 필체는 남아 있으면서 정돈된 획의 위치와 비율에 가까워졌어요." : "점수를 맞추기보다 흐린 선이 시작하고 끝나는 위치에 집중하면 더 자연스럽게 익힐 수 있어요."}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="beauty-studio-actions">
+            <button className="primary-button beauty-primary" type="button" onClick={startBeautyPractice}>
+              {beautyPracticeScore === null ? "교정된 내 글씨 따라 써보기" : "한 번 더 따라 써보기"}<span aria-hidden="true">→</span>
+            </button>
+            <button className="quiet-outline-button" type="button" onClick={() => setPhase("result")}>이 스타일로 정하고 돌아가기</button>
+          </div>
+        </section>
+      )}
+
+      {phase === "beauty-practice" && beautifiedSample && (
+        <section className="workspace-card writing-card beauty-trace-card">
+          <div className="card-heading">
+            <div>
+              <p className="section-kicker">TRACE MY BETTER STYLE</p>
+              <h2>예뻐진 내 획의 흐름을 따라가 보세요</h2>
+            </div>
+            <div className="beauty-trace-chip">{BEAUTY_STYLES[beautyStyle].name} · {beautyIdentity}% 나다움</div>
+          </div>
+
+          <div className="beauty-trace-guide">
+            <span>연습 방법</span>
+            <strong>산호색 선 위를 천천히 따라 쓰되, 원래 쓰던 획순은 그대로 유지하세요.</strong>
+          </div>
+
+          <div className="prompt-row beauty-trace-prompt">
+            <div className="quote-mark">“</div>
+            <p>{prompt}</p>
+          </div>
+
+          <div className="paper-wrap beauty-trace-paper">
+            <div className="paper-label">
+              <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Trace guide"}</span>
+              <span>산호색은 가이드 · 진한 남색은 지금 쓰는 획</span>
+            </div>
+            <SampleCanvas
+              sample={beautifiedSample}
+              className="beauty-guide-canvas"
+              color="#ed735f"
+              alpha={0.28}
+              ariaLabel="교정된 글씨 따라쓰기 가이드"
+            />
+            <canvas
+              ref={canvasRef}
+              className="writing-canvas beauty-input-canvas"
+              aria-label="교정된 내 글씨 따라 쓰기 영역"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onContextMenu={(event) => event.preventDefault()}
+            />
+            {!strokes.length && (
+              <div className="canvas-hint beauty-canvas-hint" aria-hidden="true"><span>흐린 획 위에 그대로 써 보세요</span></div>
+            )}
+          </div>
+
+          <div className="canvas-actions">
+            <div>
+              <button className="quiet-button" type="button" onClick={() => setStrokes((current) => current.slice(0, -1))} disabled={!strokes.length}>한 획 지우기</button>
+              <button className="quiet-button" type="button" onClick={resetCanvas} disabled={!strokes.length}>모두 지우기</button>
+            </div>
+            <button className="primary-button" type="button" onClick={submitBeautyPractice} disabled={!hasEnoughInk}>
+              가이드 유사도 확인 <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <button className="restart-link" type="button" onClick={() => { resetCanvas(); setPhase("beautify"); }}>스타일 선택으로 돌아가기</button>
         </section>
       )}
 
@@ -1384,6 +1744,11 @@ export default function Home() {
               <div>{feedback.exercise.map((word) => <b key={word}>{word}</b>)}</div>
             </div>
             <p className="encouragement">“{feedback.encouragement}”</p>
+            <button className="beautify-button" type="button" onClick={startBeautify}>
+              <span className="beautify-spark" aria-hidden="true">✦</span>
+              <span><strong>내 글씨 예쁘게 만들기</strong><small>나다움은 남기고 획의 흔들림만 정돈해요</small></span>
+              <b aria-hidden="true">→</b>
+            </button>
             <button className="character-lab-button" type="button" onClick={startCharacterPractice}>
               <span aria-hidden="true">{practiceCharacters[0] ?? "가"}</span>
               <span><strong>한 글자 집중 연습실</strong><small>획순 번호와 속도 히트맵 보기</small></span>

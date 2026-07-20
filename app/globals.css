@@ -171,6 +171,68 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .quiet-outline-button { min-height: 48px; padding: 0 18px; border: 1px solid #d2ccc1; border-radius: 13px; background: var(--card); color: var(--ink); font-size: 11px; font-weight: 800; cursor: pointer; }
 .restart-link.inline { width: auto; margin: 0 0 0 4px; }
 
+.beauty-studio-card { padding: clamp(24px, 4vw, 48px); border-color: rgba(237, 115, 95, 0.38); background: linear-gradient(155deg, rgba(255, 253, 248, 0.98), rgba(249, 244, 235, 0.98)); }
+.beauty-studio-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.beauty-studio-heading h2 { margin: 0 0 9px; font-size: clamp(27px, 3.5vw, 43px); letter-spacing: -0.06em; }
+.beauty-studio-heading > div > p:last-child { max-width: 630px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.75; word-break: keep-all; }
+.beauty-style-section { margin-top: 30px; }
+.beauty-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.beauty-section-title span, .beauty-identity-control > div > span { font-size: 11px; font-weight: 900; }
+.beauty-section-title small { color: var(--muted); font-size: 9px; }
+.beauty-style-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.beauty-style-card { min-width: 0; display: grid; grid-template-columns: 54px minmax(0, 1fr) 21px; gap: 13px; align-items: center; padding: 14px; border: 1px solid #d8d1c5; border-radius: 17px; background: rgba(255, 254, 250, 0.84); color: var(--ink); text-align: left; cursor: pointer; transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s; }
+.beauty-style-card:hover { transform: translateY(-2px); border-color: rgba(237, 115, 95, 0.55); }
+.beauty-style-card.selected { border-color: var(--coral); box-shadow: 0 8px 24px rgba(237, 115, 95, 0.13); }
+.beauty-style-mark { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: #f1ece3; color: var(--ink); font-family: Georgia, "Apple SD Gothic Neo", serif; font-size: 23px; font-weight: 800; }
+.beauty-style-card.selected .beauty-style-mark { background: #f8ded7; color: #b95c4e; }
+.beauty-style-card > span:nth-child(2) b { display: inline-block; font-size: 12px; }
+.beauty-style-card > span:nth-child(2) small { margin-left: 6px; color: var(--coral); font-size: 7px; font-weight: 900; }
+.beauty-style-card > span:nth-child(2) em { display: block; margin-top: 5px; color: var(--muted); font-size: 8px; font-style: normal; line-height: 1.5; word-break: keep-all; }
+.beauty-style-card > i { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #eee9df; color: transparent; font-size: 9px; font-style: normal; font-weight: 900; }
+.beauty-style-card.selected > i { background: var(--coral); color: white; }
+.beauty-identity-control { margin: 18px 0 24px; padding: 17px 19px; border-radius: 16px; background: #edf4f0; }
+.beauty-identity-control > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.beauty-identity-control strong { color: #2d7252; font-size: 11px; }
+.beauty-identity-control input { --identity: 43%; width: 100%; height: 5px; margin: 15px 0 5px; appearance: none; border-radius: 99px; outline: none; background: linear-gradient(90deg, var(--coral) var(--identity), #cbd8d0 var(--identity)); }
+.beauty-identity-control input::-webkit-slider-thumb { width: 21px; height: 21px; appearance: none; border: 5px solid var(--card); border-radius: 50%; background: var(--coral); box-shadow: 0 2px 8px rgba(23, 35, 59, 0.2); cursor: grab; }
+.beauty-identity-control input::-moz-range-thumb { width: 13px; height: 13px; border: 5px solid var(--card); border-radius: 50%; background: var(--coral); box-shadow: 0 2px 8px rgba(23, 35, 59, 0.2); cursor: grab; }
+.beauty-identity-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 8px; }
+.beauty-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr); gap: 12px; align-items: center; }
+.beauty-preview-card { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255, 254, 250, 0.82); }
+.beauty-preview-card.after { border-color: rgba(237, 115, 95, 0.5); background: #fff6f2; box-shadow: 0 10px 28px rgba(237, 115, 95, 0.09); }
+.beauty-preview-card > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+.beauty-preview-card > div:first-child span { color: var(--muted); font-size: 8px; font-weight: 900; letter-spacing: 0.13em; }
+.beauty-preview-card.after > div:first-child span { color: var(--coral); }
+.beauty-preview-card > div:first-child strong { font-size: 11px; }
+.beauty-preview-paper { overflow: hidden; border: 1px solid #d8d1c5; border-radius: 13px; background-color: #fffefa; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 65.8%, rgba(69, 98, 134, 0.12) 66%, transparent 66.5%); }
+.beauty-preview-paper canvas { width: 100%; height: clamp(190px, 23vw, 255px); display: block; }
+.beauty-preview-arrow { display: grid; justify-items: center; gap: 6px; color: var(--coral); text-align: center; }
+.beauty-preview-arrow span { width: 45px; height: 45px; display: grid; place-items: center; border-radius: 50%; background: var(--coral); color: white; font-size: 19px; box-shadow: 0 8px 18px rgba(237, 115, 95, 0.2); }
+.beauty-preview-arrow b { color: var(--muted); font-size: 7px; line-height: 1.3; letter-spacing: 0.12em; }
+.beauty-change-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 13px; }
+.beauty-change-row > span { margin-right: 4px; color: var(--muted); font-size: 9px; font-weight: 850; }
+.beauty-change-row b { padding: 7px 9px; border-radius: 99px; background: #e5f0ea; color: #326e51; font-size: 8px; }
+.beauty-change-row small { margin-left: auto; color: var(--muted); font-size: 8px; }
+.beauty-practice-result { display: grid; grid-template-columns: 105px 1fr; gap: 19px; align-items: center; margin-top: 21px; padding: 20px; border: 1px solid rgba(90, 169, 133, 0.32); border-radius: 18px; background: linear-gradient(135deg, #e6f1eb, #f8f4ec); }
+.beauty-match-score { min-height: 85px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 15px; background: var(--ink); color: white; }
+.beauty-match-score strong { font-size: 38px; letter-spacing: -0.08em; }
+.beauty-match-score span { color: rgba(255, 255, 255, 0.62); font-size: 7px; line-height: 1.45; }
+.beauty-practice-result h3 { margin: -5px 0 5px; font-size: 18px; letter-spacing: -0.04em; }
+.beauty-practice-result > div:last-child > p:last-child { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
+.beauty-studio-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+.beauty-primary { background: var(--coral); box-shadow: 0 9px 22px rgba(237, 115, 95, 0.24); }
+
+.beauty-trace-card { border-color: rgba(237, 115, 95, 0.42); }
+.beauty-trace-chip { padding: 9px 12px; border-radius: 99px; background: #f7dfd8; color: #a65245; font-size: 9px; font-weight: 850; white-space: nowrap; }
+.beauty-trace-guide { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin: 24px 0 16px; padding: 14px 17px; border-radius: 14px; background: #edf4f0; }
+.beauty-trace-guide span { padding-right: 14px; border-right: 1px solid rgba(53, 95, 74, 0.18); color: #397155; font-size: 9px; font-weight: 900; }
+.beauty-trace-guide strong { color: #355f4a; font-size: 11px; line-height: 1.55; }
+.beauty-trace-prompt { margin-top: 0; }
+.beauty-trace-paper { isolation: isolate; }
+.beauty-guide-canvas { position: absolute; z-index: 1; top: 34px; left: 0; width: 100%; height: calc(100% - 34px); display: block; pointer-events: none; }
+.beauty-input-canvas { position: relative; z-index: 2; background: transparent; }
+.beauty-canvas-hint { z-index: 3; }
+
 .analyzing-card { min-height: 560px; padding: 75px 24px; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .analyzing-card h2 { margin: 2px 0 12px; font-size: clamp(26px, 4vw, 42px); letter-spacing: -0.055em; }
 .analyzing-card > p:not(.section-kicker) { color: var(--muted); margin: 0; }
@@ -266,6 +328,12 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .exercise-block > div { display: flex; gap: 7px; margin-top: 9px; }
 .exercise-block b { flex: 1; padding: 12px 5px; border: 1px dashed #c9c2b4; border-radius: 10px; text-align: center; font-size: 14px; }
 .encouragement { margin: 21px 3px; color: var(--coral); font-family: Georgia, "Apple SD Gothic Neo", serif; font-size: 12px; line-height: 1.6; text-align: center; }
+.beautify-button { width: 100%; min-height: 68px; margin-bottom: 9px; display: grid; grid-template-columns: 45px 1fr auto; gap: 12px; align-items: center; padding: 9px 15px 9px 10px; border: 1px solid rgba(237, 115, 95, 0.48); border-radius: 14px; background: linear-gradient(135deg, #fff0eb, #f8ead8); color: var(--ink); text-align: left; cursor: pointer; box-shadow: 0 8px 18px rgba(237, 115, 95, 0.09); transition: transform 0.2s, box-shadow 0.2s; }
+.beautify-button:hover { transform: translateY(-2px); box-shadow: 0 11px 24px rgba(237, 115, 95, 0.16); }
+.beautify-spark { width: 45px; height: 45px; display: grid; place-items: center; border-radius: 13px; background: var(--coral); color: white; font-size: 20px; }
+.beautify-button > span:nth-child(2) strong { display: block; font-size: 12px; }
+.beautify-button > span:nth-child(2) small { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
+.beautify-button > b { color: var(--coral); font-size: 16px; }
 .character-lab-button { width: 100%; min-height: 65px; margin-bottom: 9px; display: grid; grid-template-columns: 43px 1fr auto; gap: 12px; align-items: center; padding: 8px 15px 8px 9px; border: 1px solid rgba(90, 169, 133, 0.4); border-radius: 14px; background: linear-gradient(135deg, #e4f1ea, #f6f1e7); color: var(--ink); text-align: left; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
 .character-lab-button:hover { transform: translateY(-2px); box-shadow: 0 9px 20px rgba(43, 93, 69, 0.11); }
 .character-lab-button > span:first-child { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 12px; background: var(--ink); color: white; font-size: 22px; font-weight: 850; }
@@ -288,6 +356,8 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .result-layout { grid-template-columns: 1fr; }
   .coaching-card { position: static; }
   .character-result-grid { grid-template-columns: 1fr; }
+  .beauty-style-grid { grid-template-columns: 1fr; }
+  .beauty-style-card { grid-template-columns: 54px minmax(0, 1fr) 21px; }
   .metric-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .overlay-paper canvas { height: 220px; }
 }
@@ -333,6 +403,16 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .character-result-actions { align-items: stretch; flex-direction: column; }
   .character-result-actions .primary-button, .quiet-outline-button { width: 100%; }
   .restart-link.inline { width: 100%; margin: 0; }
+  .beauty-studio-heading { flex-direction: column; gap: 13px; }
+  .beauty-studio-heading .restart-link.inline { text-align: left; }
+  .beauty-section-title { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .beauty-preview-grid { grid-template-columns: 1fr; }
+  .beauty-preview-arrow { grid-template-columns: auto auto; justify-content: center; align-items: center; }
+  .beauty-preview-arrow span { width: 38px; height: 38px; }
+  .beauty-preview-arrow b br { display: none; }
+  .beauty-change-row small { width: 100%; margin: 4px 0 0; }
+  .beauty-studio-actions { align-items: stretch; flex-direction: column; }
+  .beauty-studio-actions .primary-button, .beauty-studio-actions .quiet-outline-button { width: 100%; }
   .overlay-panel { padding: 15px; }
   .overlay-heading { align-items: flex-start; flex-direction: column; }
   .replay-button { width: 100%; justify-content: center; }
@@ -341,6 +421,15 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .before-after-grid { grid-template-columns: 1fr; }
   .compare-arrow { transform: rotate(90deg); text-align: center; }
   .comparison-sample { grid-template-columns: 1fr 44px; }
+  .beauty-studio-card { padding: 22px 15px; border-radius: 20px; }
+  .beauty-style-card { padding: 11px; }
+  .beauty-style-mark { width: 47px; height: 47px; }
+  .beauty-preview-paper canvas { height: 185px; }
+  .beauty-practice-result { grid-template-columns: 1fr; }
+  .beauty-match-score { min-height: 66px; }
+  .beauty-trace-chip { white-space: normal; text-align: right; }
+  .beauty-trace-guide { grid-template-columns: 1fr; gap: 8px; }
+  .beauty-trace-guide span { padding: 0 0 8px; border-right: 0; border-bottom: 1px solid rgba(53, 95, 74, 0.18); }
   footer { flex-direction: column; }
 }
 
