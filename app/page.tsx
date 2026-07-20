@@ -258,13 +258,20 @@ function buildFallbackFeedback(summary: AnalysisSummary): Feedback {
   };
 }
 
-function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, width: number, height: number) {
+function drawStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  width: number,
+  height: number,
+  style?: { color?: string; alpha?: number; lineWidth?: number },
+) {
   if (!stroke.points.length) return;
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "#17233b";
-  ctx.lineWidth = stroke.pointerType === "pen" ? 3.2 : 4.2;
+  ctx.strokeStyle = style?.color ?? "#17233b";
+  ctx.globalAlpha = style?.alpha ?? 1;
+  ctx.lineWidth = style?.lineWidth ?? (stroke.pointerType === "pen" ? 3.2 : 4.2);
   ctx.beginPath();
   ctx.moveTo(stroke.points[0].x * width, stroke.points[0].y * height);
 
@@ -283,6 +290,171 @@ function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, width: number
   }
   ctx.stroke();
   ctx.restore();
+}
+
+function findVarianceHotspot(samples: Sample[]) {
+  const paths = samples.map((sample) => sample.strokes.flatMap((stroke) => stroke.points));
+  let hotspot = { x: 0.5, y: 0.5, spread: 0 };
+
+  for (let step = 0; step <= 32; step += 1) {
+    const progress = step / 32;
+    const points = paths
+      .filter((path) => path.length)
+      .map((path) => path[Math.min(path.length - 1, Math.round(progress * (path.length - 1)))]);
+    if (points.length < 2) continue;
+    const centerX = mean(points.map((point) => point.x));
+    const centerY = mean(points.map((point) => point.y));
+    const spread = mean(points.map((point) => Math.hypot(point.x - centerX, point.y - centerY)));
+    if (spread > hotspot.spread) hotspot = { x: centerX, y: centerY, spread };
+  }
+
+  return hotspot;
+}
+
+function scorePracticeSample(sample: Sample, summary: AnalysisSummary) {
+  const metric = measureSample(sample);
+  const targetRhythm = mean(summary.samples.map((item) => item.rhythm));
+  const targetShape = summary.averages.width / Math.max(summary.averages.height, 0.01);
+  const sampleShape = metric.width / Math.max(metric.height, 0.01);
+  const deviations = {
+    size:
+      Math.abs(
+        Math.sqrt(metric.area) - Math.sqrt(summary.averages.width * summary.averages.height),
+      ) / Math.max(Math.sqrt(summary.averages.width * summary.averages.height), 0.01),
+    speed: Math.abs(metric.speed - summary.averages.speed) / Math.max(summary.averages.speed, 0.01),
+    stroke:
+      Math.abs(metric.strokeCount - summary.averages.strokeCount) /
+      Math.max(summary.averages.strokeCount, 1),
+    rhythm: Math.abs(metric.rhythm - targetRhythm) / Math.max(targetRhythm, 0.08),
+    shape: Math.abs(sampleShape - targetShape) / Math.max(targetShape, 0.01),
+  };
+  const overall = mean(Object.values(deviations).map((value) => Math.min(value, 1)));
+  const focused = Math.min(deviations[summary.focusKey], 1);
+  return Math.round(clamp(97 - focused * 48 - overall * 30, 42, 98));
+}
+
+const OVERLAY_COLORS = ["#ed735f", "#5aa985", "#17233b"];
+
+function StrokeOverlay({ samples, focusLabel, variation }: { samples: Sample[]; focusLabel: string; variation: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(1);
+  const hotspot = useMemo(() => findVarianceHotspot(samples), [samples]);
+
+  const renderFrame = useCallback(
+    (frameProgress: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.scale(ratio, ratio);
+
+      samples.forEach((sample, sampleIndex) => {
+        const totalPoints = sample.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
+        let remaining = Math.floor(totalPoints * frameProgress);
+        sample.strokes.forEach((stroke) => {
+          if (remaining <= 0) return;
+          const visibleCount = Math.min(stroke.points.length, remaining);
+          if (visibleCount > 0) {
+            drawStroke(
+              ctx,
+              { ...stroke, points: stroke.points.slice(0, visibleCount) },
+              rect.width,
+              rect.height,
+              { color: OVERLAY_COLORS[sampleIndex], alpha: 0.66, lineWidth: 3.4 },
+            );
+          }
+          remaining -= stroke.points.length;
+        });
+      });
+
+      if (frameProgress >= 0.98) {
+        const x = hotspot.x * rect.width;
+        const y = hotspot.y * rect.height;
+        const radius = clamp(hotspot.spread * Math.min(rect.width, rect.height) * 2.8, 18, 42);
+        ctx.save();
+        ctx.strokeStyle = "#ed735f";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(237, 115, 95, 0.1)";
+        ctx.fill();
+        ctx.restore();
+      }
+    },
+    [hotspot, samples],
+  );
+
+  useEffect(() => {
+    renderFrame(progress);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => renderFrame(progress));
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [progress, renderFrame]);
+
+  useEffect(
+    () => () => {
+      if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    },
+    [],
+  );
+
+  const replay = () => {
+    if (animationRef.current !== null) window.cancelAnimationFrame(animationRef.current);
+    const startedAt = performance.now();
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 500 : 3000;
+    setIsPlaying(true);
+    setProgress(0);
+    const tick = (now: number) => {
+      const nextProgress = clamp((now - startedAt) / duration, 0, 1);
+      setProgress(nextProgress);
+      if (nextProgress < 1) {
+        animationRef.current = window.requestAnimationFrame(tick);
+      } else {
+        animationRef.current = null;
+        setIsPlaying(false);
+      }
+    };
+    animationRef.current = window.requestAnimationFrame(tick);
+  };
+
+  const variationPercent = Math.round(clamp(variation * 140, 8, 64));
+
+  return (
+    <div className="overlay-panel">
+      <div className="overlay-heading">
+        <div>
+          <p className="section-kicker">3-WAY MOTION OVERLAY</p>
+          <h3>세 번의 필기를 한 장에 겹쳤어요</h3>
+        </div>
+        <button className="replay-button" type="button" onClick={replay} disabled={isPlaying}>
+          <span aria-hidden="true">{isPlaying ? "•••" : "▶"}</span>
+          {isPlaying ? "재생 중" : "획순 다시 보기"}
+        </button>
+      </div>
+      <div className="overlay-paper">
+        <canvas ref={canvasRef} aria-label="세 번의 필기 움직임 오버레이" />
+        <div className="overlay-legend" aria-hidden="true">
+          {OVERLAY_COLORS.map((color, index) => (
+            <span key={color}><i style={{ background: color }} />{index + 1}번째</span>
+          ))}
+        </div>
+      </div>
+      <div className="hotspot-caption">
+        <span className="hotspot-icon">◎</span>
+        <p><strong>가장 많이 달라진 구간</strong><br />{focusLabel} 변화가 약 {variationPercent}% 감지됐어요.</p>
+      </div>
+    </div>
+  );
 }
 
 function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
@@ -317,17 +489,20 @@ export default function Home() {
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [samples, setSamples] = useState<Sample[]>([]);
   const [prompt, setPrompt] = useState(PROMPTS[0]);
-  const [phase, setPhase] = useState<"write" | "analyzing" | "result">("write");
+  const [phase, setPhase] = useState<"write" | "analyzing" | "result" | "practice">("write");
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [analysisMode, setAnalysisMode] = useState<"ai" | "local">("local");
   const [inputMode, setInputMode] = useState<"touch" | "pen" | "mouse" | null>(null);
+  const [afterSample, setAfterSample] = useState<Sample | null>(null);
+  const [afterScore, setAfterScore] = useState<number | null>(null);
 
   const sampleNumber = samples.length + 1;
   const hasEnoughInk = useMemo(
     () => strokes.reduce((count, stroke) => count + stroke.points.length, 0) >= 8,
     [strokes],
   );
+  const isDrawingPhase = phase === "write" || phase === "practice";
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -369,7 +544,7 @@ export default function Home() {
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (phase !== "write" || activePointerRef.current !== null) return;
+    if (!isDrawingPhase || activePointerRef.current !== null) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     activePointerRef.current = event.pointerId;
@@ -380,7 +555,7 @@ export default function Home() {
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (activePointerRef.current !== event.pointerId || phase !== "write") return;
+    if (activePointerRef.current !== event.pointerId || !isDrawingPhase) return;
     event.preventDefault();
     const nativeEvent = event.nativeEvent;
     const coalesced = typeof nativeEvent.getCoalescedEvents === "function" ? nativeEvent.getCoalescedEvents() : [nativeEvent];
@@ -462,10 +637,28 @@ export default function Home() {
     setSamples([]);
     setSummary(null);
     setFeedback(null);
+    setAfterSample(null);
+    setAfterScore(null);
     setAnalysisMode("local");
     setInputMode(null);
     resetCanvas();
     setPhase("write");
+  };
+
+  const startPractice = () => {
+    resetCanvas();
+    setAfterSample(null);
+    setAfterScore(null);
+    setPhase("practice");
+  };
+
+  const submitPractice = () => {
+    if (!hasEnoughInk || !summary) return;
+    const practiceSample: Sample = { strokes, pointerType: inputMode ?? "unknown" };
+    setAfterSample(practiceSample);
+    setAfterScore(scorePracticeSample(practiceSample, summary));
+    resetCanvas();
+    setPhase("result");
   };
 
   return (
@@ -593,6 +786,64 @@ export default function Home() {
         </section>
       )}
 
+      {phase === "practice" && summary && feedback && (
+        <section className="workspace-card writing-card practice-card">
+          <div className="card-heading">
+            <div>
+              <p className="section-kicker">CORRECTION ROUND</p>
+              <h2>교정 포인트를 생각하며 한 번 더 써 보세요</h2>
+            </div>
+            <div className="practice-score-chip">교정 전 {summary.consistency}점</div>
+          </div>
+
+          <div className="practice-focus-strip">
+            <span>오늘의 초점 · {summary.focusLabel}</span>
+            <strong>{feedback.tip}</strong>
+          </div>
+
+          <div className="prompt-row practice-prompt">
+            <div className="quote-mark">“</div>
+            <p>{prompt}</p>
+          </div>
+
+          <div className="paper-wrap">
+            <div className="paper-label">
+              <span>{inputMode === "pen" ? "Pencil mode" : inputMode === "touch" ? "Finger mode" : "Correction round"}</span>
+              <span>방금 본 한 가지 포인트에만 집중해 보세요</span>
+            </div>
+            <canvas
+              ref={canvasRef}
+              className="writing-canvas"
+              aria-label="교정 후 한글 필기 입력 영역"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onContextMenu={(event) => event.preventDefault()}
+            />
+            {!strokes.length && (
+              <div className="canvas-hint" aria-hidden="true">
+                <span>같은 문장을 다시 써 보세요</span>
+              </div>
+            )}
+          </div>
+
+          <div className="canvas-actions">
+            <div>
+              <button className="quiet-button" type="button" onClick={() => setStrokes((current) => current.slice(0, -1))} disabled={!strokes.length}>
+                한 획 지우기
+              </button>
+              <button className="quiet-button" type="button" onClick={resetCanvas} disabled={!strokes.length}>
+                모두 지우기
+              </button>
+            </div>
+            <button className="primary-button" type="button" onClick={submitPractice} disabled={!hasEnoughInk}>
+              교정 후 점수 확인 <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </section>
+      )}
+
       {phase === "result" && summary && feedback && (
         <section className="result-layout">
           <div className="workspace-card score-card">
@@ -601,20 +852,63 @@ export default function Home() {
               <span className="analysis-badge">{analysisMode === "ai" ? "GPT-5.6 코칭" : "기기 내 코칭"}</span>
             </div>
             <div className="score-row">
-              <div className="score-ring" style={{ "--score": summary.consistency } as React.CSSProperties}>
-                <div><strong>{summary.consistency}</strong><span>/ 100</span></div>
+              <div className="score-ring" style={{ "--score": afterScore ?? summary.consistency } as React.CSSProperties}>
+                <div><strong>{afterScore ?? summary.consistency}</strong><span>/ 100</span></div>
               </div>
               <div>
-                <h2>당신의 필체는 이미<br /><em>{summary.consistency >= 82 ? "한결같은 편" : "좋은 흐름을 가진 편"}</em>이에요.</h2>
-                <p>{feedback.keep}</p>
+                <h2>
+                  {afterScore !== null ? "교정 포인트를 적용한 글씨가" : "당신의 필체는 이미"}<br />
+                  <em>
+                    {afterScore !== null
+                      ? afterScore > summary.consistency
+                        ? "더 안정적으로 변했어요"
+                        : "새 리듬을 익히는 중이에요"
+                      : summary.consistency >= 82
+                        ? "한결같은 편"
+                        : "좋은 흐름을 가진 편"}
+                  </em>
+                  {afterScore === null && "이에요."}
+                </h2>
+                <p>
+                  {afterScore !== null
+                    ? afterScore > summary.consistency
+                      ? `${summary.focusLabel}에 집중한 결과, 처음보다 ${afterScore - summary.consistency}점 더 안정적으로 측정됐어요.`
+                      : "한 번에 바뀌지 않아도 괜찮아요. 교정 포인트를 의식한 것부터 좋은 시작이에요."
+                    : feedback.keep}
+                </p>
               </div>
             </div>
 
-            <div className="sample-gallery">
-              {samples.map((sample, index) => (
-                <StrokeThumbnail sample={sample} label={`${index + 1}번째`} key={index} />
-              ))}
-            </div>
+            <StrokeOverlay
+              samples={samples}
+              focusLabel={summary.focusLabel}
+              variation={summary.variations[summary.focusKey]}
+            />
+
+            {afterSample && afterScore !== null && (
+              <div className="improvement-panel">
+                <div className="improvement-heading">
+                  <div>
+                    <p className="section-kicker">BEFORE &amp; AFTER</p>
+                    <h3>한 번의 집중이 만든 변화</h3>
+                  </div>
+                  <span className={afterScore >= summary.consistency ? "score-delta up" : "score-delta"}>
+                    {afterScore >= summary.consistency ? "+" : ""}{afterScore - summary.consistency}점
+                  </span>
+                </div>
+                <div className="before-after-grid">
+                  <div className="comparison-sample">
+                    <StrokeThumbnail sample={samples[2]} label="교정 전 대표" />
+                    <strong>{summary.consistency}<small>점</small></strong>
+                  </div>
+                  <span className="compare-arrow" aria-hidden="true">→</span>
+                  <div className="comparison-sample after">
+                    <StrokeThumbnail sample={afterSample} label="교정 후" />
+                    <strong>{afterScore}<small>점</small></strong>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="metric-grid">
               {(
@@ -651,9 +945,10 @@ export default function Home() {
               <div>{feedback.exercise.map((word) => <b key={word}>{word}</b>)}</div>
             </div>
             <p className="encouragement">“{feedback.encouragement}”</p>
-            <button className="primary-button full" type="button" onClick={restart}>
-              같은 문장으로 다시 쓰기 <span aria-hidden="true">↻</span>
+            <button className="primary-button full" type="button" onClick={startPractice}>
+              {afterSample ? "한 번 더 교정 연습" : "이 포인트로 한 번 더 써보기"} <span aria-hidden="true">→</span>
             </button>
+            <button className="restart-link" type="button" onClick={restart}>처음부터 새로 분석하기</button>
           </aside>
         </section>
       )}
