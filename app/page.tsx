@@ -89,22 +89,22 @@ const BEAUTY_STYLES: Record<
   neat: {
     name: "단정한 정리체",
     english: "NEAT",
-    description: "획의 떨림을 줄이고 높이와 중심을 차분하게 정돈해요.",
-    changes: ["미세 떨림 완화", "높이 균형", "또렷한 마무리"],
+    description: "글자별 기준선과 높이를 맞추고 가로·세로획을 또렷하게 펴요.",
+    changes: ["기준선 정렬", "높이 통일", "직선 획 정돈"],
     mark: "가",
   },
   round: {
     name: "둥근 온기체",
     english: "ROUND",
-    description: "원래 필체의 곡선을 살리면서 모서리를 부드럽게 만들어요.",
-    changes: ["곡선 강조", "부드러운 연결", "편안한 인상"],
+    description: "글자 높이는 맞추고 원래 필체의 굴곡을 더 둥글고 크게 살려요.",
+    changes: ["기준선 정렬", "곡선 강조", "넉넉한 너비"],
     mark: "동",
   },
   flow: {
     name: "가벼운 흐름체",
     english: "FLOW",
-    description: "쓰는 방향을 자연스럽게 이어 빠르고 감성적인 리듬을 만들어요.",
-    changes: ["오른쪽 흐름", "획 연결감", "가벼운 리듬"],
+    description: "글자 사이를 정돈하고 오른쪽으로 흐르는 기울기를 분명하게 만들어요.",
+    changes: ["간격 정돈", "오른쪽 기울기", "가벼운 리듬"],
     mark: "결",
   },
 };
@@ -419,27 +419,104 @@ function scorePracticeSample(sample: Sample, summary: AnalysisSummary) {
   return Math.round(clamp(97 - focused * 48 - overall * 30, 42, 98));
 }
 
-function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: number): Sample {
+function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: number, prompt: string): Sample {
   const allPoints = sample.strokes.flatMap((stroke) => stroke.points);
   if (!allPoints.length) return sample;
   const minX = Math.min(...allPoints.map((point) => point.x));
   const maxX = Math.max(...allPoints.map((point) => point.x));
   const minY = Math.min(...allPoints.map((point) => point.y));
   const maxY = Math.max(...allPoints.map((point) => point.y));
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const strength = clamp((100 - identity) / 45, 0.18, 1);
+  const strength = clamp((100 - identity) / 45, 0.22, 1.18);
   const style = {
-    neat: { smoothing: 0.58, width: 1.012, height: 0.96, shear: 0, curve: -0.08 },
-    round: { smoothing: 0.68, width: 1.018, height: 1.045, shear: 0.012, curve: 0.24 },
-    flow: { smoothing: 0.48, width: 1.035, height: 0.97, shear: -0.075, curve: 0.08 },
+    neat: { smoothing: 0.76, width: 0.98, height: 1, shear: 0, curve: -0.42, align: 0.9 },
+    round: { smoothing: 0.82, width: 1.07, height: 1.08, shear: -0.018, curve: 0.48, align: 0.68 },
+    flow: { smoothing: 0.64, width: 1.08, height: 0.94, shear: -0.16, curve: 0.16, align: 0.5 },
   }[styleKey];
+
+  const promptUnits = Array.from(prompt).map((character) => ({
+    character,
+    width: /\s/.test(character) ? 0.62 : /[.,!?·]/.test(character) ? 0.42 : 1,
+  }));
+  const totalPromptWidth = promptUnits.reduce((sum, unit) => sum + unit.width, 0);
+  let promptCursor = 0;
+  const slots = promptUnits.flatMap((unit) => {
+    const center = promptCursor + unit.width / 2;
+    promptCursor += unit.width;
+    return /[가-힣]/.test(unit.character)
+      ? [minX + (center / Math.max(totalPromptWidth, 1)) * (maxX - minX)]
+      : [];
+  });
+
+  const strokeBounds = sample.strokes.map((stroke) => {
+    const xs = stroke.points.map((point) => point.x);
+    const ys = stroke.points.map((point) => point.y);
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+      centerX: (Math.min(...xs) + Math.max(...xs)) / 2,
+    };
+  });
+  const groups = slots.map((targetCenterX) => ({ targetCenterX, strokeIndexes: [] as number[] }));
+  strokeBounds.forEach((bounds, strokeIndex) => {
+    if (!groups.length) return;
+    let closestIndex = 0;
+    for (let index = 1; index < groups.length; index += 1) {
+      if (
+        Math.abs(groups[index].targetCenterX - bounds.centerX) <
+        Math.abs(groups[closestIndex].targetCenterX - bounds.centerX)
+      ) closestIndex = index;
+    }
+    groups[closestIndex].strokeIndexes.push(strokeIndex);
+  });
+
+  const populatedGroups = groups
+    .filter((group) => group.strokeIndexes.length)
+    .map((group) => {
+      const bounds = group.strokeIndexes.map((index) => strokeBounds[index]);
+      const groupMinX = Math.min(...bounds.map((item) => item.minX));
+      const groupMaxX = Math.max(...bounds.map((item) => item.maxX));
+      const groupMinY = Math.min(...bounds.map((item) => item.minY));
+      const groupMaxY = Math.max(...bounds.map((item) => item.maxY));
+      return {
+        ...group,
+        minX: groupMinX,
+        maxX: groupMaxX,
+        minY: groupMinY,
+        maxY: groupMaxY,
+        centerX: (groupMinX + groupMaxX) / 2,
+        centerY: (groupMinY + groupMaxY) / 2,
+        width: Math.max(groupMaxX - groupMinX, 0.012),
+        height: Math.max(groupMaxY - groupMinY, 0.012),
+      };
+    });
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : mean([sorted[middle - 1], sorted[middle]]);
+  };
+  const targetWidth = median(populatedGroups.map((group) => group.width));
+  const targetHeight = median(populatedGroups.map((group) => group.height));
+  const targetBaseline = median(populatedGroups.map((group) => group.maxY));
+  const groupByStroke = new Map<number, (typeof populatedGroups)[number]>();
+  populatedGroups.forEach((group) => group.strokeIndexes.forEach((index) => groupByStroke.set(index, group)));
 
   return {
     ...sample,
-    strokes: sample.strokes.map((stroke) => {
+    strokes: sample.strokes.map((stroke, strokeIndex) => {
       const first = stroke.points[0];
       const last = stroke.points[stroke.points.length - 1] ?? first;
+      const group = groupByStroke.get(strokeIndex);
+      const groupCenterX = group?.centerX ?? (minX + maxX) / 2;
+      const groupCenterY = group?.centerY ?? (minY + maxY) / 2;
+      const groupScaleX = group ? clamp(targetWidth / group.width, 0.78, 1.22) * style.width : style.width;
+      const groupScaleY = group ? clamp(targetHeight / group.height, 0.8, 1.2) * style.height : style.height;
+      const shiftX = group
+        ? clamp((group.targetCenterX - group.centerX) * style.align, -0.038, 0.038)
+        : 0;
+      const targetCenterY = targetBaseline - targetHeight / 2;
+      const shiftY = group ? clamp((targetCenterY - group.centerY) * style.align, -0.055, 0.055) : 0;
       return {
         ...stroke,
         points: stroke.points.map((point, index, points) => {
@@ -453,10 +530,16 @@ function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: numb
           const progress = points.length > 1 ? index / (points.length - 1) : 0;
           const chordX = first.x + (last.x - first.x) * progress;
           const chordY = first.y + (last.y - first.y) * progress;
-          const curvedX = chordX + (smoothX - chordX) * (1 + style.curve);
-          const curvedY = chordY + (smoothY - chordY) * (1 + style.curve);
-          const styledX = centerX + (curvedX - centerX) * style.width + (curvedY - centerY) * style.shear;
-          const styledY = centerY + (curvedY - centerY) * style.height;
+          const deltaX = Math.abs(last.x - first.x);
+          const deltaY = Math.abs(last.y - first.y);
+          const axisStroke = deltaX > deltaY * 1.7 || deltaY > deltaX * 1.7;
+          const curve = styleKey === "neat" && !axisStroke ? style.curve * 0.45 : style.curve;
+          const curvedX = chordX + (smoothX - chordX) * (1 + curve);
+          const curvedY = chordY + (smoothY - chordY) * (1 + curve);
+          const scaledX = groupCenterX + (curvedX - groupCenterX) * groupScaleX;
+          const scaledY = groupCenterY + (curvedY - groupCenterY) * groupScaleY;
+          const styledX = scaledX + (scaledY - groupCenterY) * style.shear + shiftX;
+          const styledY = scaledY + shiftY;
           return {
             ...point,
             x: clamp(point.x + (styledX - point.x) * strength, 0.015, 0.985),
@@ -466,6 +549,20 @@ function beautifySample(sample: Sample, styleKey: BeautyStyleKey, identity: numb
       };
     }),
   };
+}
+
+function measureCorrectionDistance(source: Sample, corrected: Sample) {
+  const distances: number[] = [];
+  const strokeCount = Math.min(source.strokes.length, corrected.strokes.length);
+  for (let index = 0; index < strokeCount; index += 1) {
+    const sourcePoints = resampleStroke(source.strokes[index], 18);
+    const correctedPoints = resampleStroke(corrected.strokes[index], 18);
+    sourcePoints.forEach((point, pointIndex) => {
+      const correctedPoint = correctedPoints[pointIndex];
+      if (correctedPoint) distances.push(Math.hypot(point.x - correctedPoint.x, point.y - correctedPoint.y));
+    });
+  }
+  return Math.max(1, Math.round(mean(distances) * 900));
 }
 
 function resampleStroke(stroke: Stroke, count = 14) {
@@ -815,10 +912,10 @@ function SampleCanvas({
     if (!ctx) return;
     ctx.scale(ratio, ratio);
     underlay?.strokes.forEach((stroke) =>
-      drawStroke(ctx, stroke, rect.width, rect.height, { color: "#9b9b94", alpha: 0.24, lineWidth: 4 }),
+      drawStroke(ctx, stroke, rect.width, rect.height, { color: "#8d8f8b", alpha: 0.18, lineWidth: 3.8 }),
     );
     sample.strokes.forEach((stroke) =>
-      drawStroke(ctx, stroke, rect.width, rect.height, { color, alpha, lineWidth: 4.2 }),
+      drawStroke(ctx, stroke, rect.width, rect.height, { color, alpha, lineWidth: underlay ? 5 : 4.2 }),
     );
   }, [alpha, color, sample, underlay]);
 
@@ -886,7 +983,7 @@ export default function Home() {
   const [characterSamples, setCharacterSamples] = useState<Sample[]>([]);
   const [characterSummary, setCharacterSummary] = useState<AnalysisSummary | null>(null);
   const [beautyStyle, setBeautyStyle] = useState<BeautyStyleKey>("neat");
-  const [beautyIdentity, setBeautyIdentity] = useState(70);
+  const [beautyIdentity, setBeautyIdentity] = useState(58);
   const [beautyPracticeScore, setBeautyPracticeScore] = useState<number | null>(null);
 
   const sampleNumber = samples.length + 1;
@@ -906,8 +1003,12 @@ export default function Home() {
     [characterSamples, characterSummary],
   );
   const beautifiedSample = useMemo(
-    () => (samples[2] ? beautifySample(samples[2], beautyStyle, beautyIdentity) : null),
-    [beautyIdentity, beautyStyle, samples],
+    () => (samples[2] ? beautifySample(samples[2], beautyStyle, beautyIdentity, prompt) : null),
+    [beautyIdentity, beautyStyle, prompt, samples],
+  );
+  const beautyCorrectionDistance = useMemo(
+    () => (samples[2] && beautifiedSample ? measureCorrectionDistance(samples[2], beautifiedSample) : 0),
+    [beautifiedSample, samples],
   );
   const isDrawingPhase =
     phase === "write" || phase === "practice" || phase === "character-practice" || phase === "beauty-practice";
@@ -1052,7 +1153,7 @@ export default function Home() {
     setCharacterSamples([]);
     setCharacterSummary(null);
     setBeautyStyle("neat");
-    setBeautyIdentity(70);
+    setBeautyIdentity(58);
     setBeautyPracticeScore(null);
     setAnalysisMode("local");
     setInputMode(null);
@@ -1325,7 +1426,7 @@ export default function Home() {
             <div>
               <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
               <h2>내 글씨의 예쁜 가능성을 만들었어요</h2>
-              <p>폰트로 바꾸지 않고, 내가 쓴 획의 70%는 남긴 채 흔들림과 리듬만 다듬어요.</p>
+              <p>폰트로 바꾸지 않고, 내가 쓴 획의 {beautyIdentity}%는 남긴 채 글자별 기준선·높이·간격과 획의 모양을 함께 다듬어요.</p>
             </div>
             <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
           </div>
@@ -1357,11 +1458,11 @@ export default function Home() {
           <div className="beauty-identity-control">
             <div>
               <span>2. 내 글씨다움</span>
-              <strong>{beautyIdentity}% 유지</strong>
+              <strong>{beautyIdentity}% 유지 · {beautyIdentity <= 55 ? "확실한 교정" : beautyIdentity <= 70 ? "균형 교정" : "섬세한 교정"}</strong>
             </div>
             <input
               type="range"
-              min="55"
+              min="40"
               max="90"
               step="1"
               value={beautyIdentity}
@@ -1370,9 +1471,9 @@ export default function Home() {
                 setBeautyIdentity(Number(event.target.value));
                 setBeautyPracticeScore(null);
               }}
-              style={{ "--identity": `${((beautyIdentity - 55) / 35) * 100}%` } as React.CSSProperties}
+              style={{ "--identity": `${((beautyIdentity - 40) / 50) * 100}%` } as React.CSSProperties}
             />
-            <div className="beauty-identity-labels"><span>더 많이 교정</span><span>원래 필체 유지</span></div>
+            <div className="beauty-identity-labels"><span>확실하게 교정</span><span>원래 필체 유지</span></div>
           </div>
 
           <div className="beauty-preview-grid">
@@ -1384,7 +1485,7 @@ export default function Home() {
             </div>
             <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>AI<br />STYLING</b></div>
             <div className="beauty-preview-card after">
-              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong></div>
+              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">평균 {beautyCorrectionDistance}px 보정</em></div>
               <div className="beauty-preview-paper">
                 <SampleCanvas
                   sample={beautifiedSample}

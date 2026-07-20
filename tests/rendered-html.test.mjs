@@ -72,6 +72,10 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.match(source, /둥근 온기체/);
   assert.match(source, /가벼운 흐름체/);
   assert.match(source, /beautifySample/);
+  assert.match(source, /targetBaseline/);
+  assert.match(source, /기준선 정렬/);
+  assert.match(source, /measureCorrectionDistance/);
+  assert.match(source, /min="40"/);
   assert.match(source, /scoreAgainstTarget/);
   assert.match(source, /가이드 유사도 확인/);
 });
