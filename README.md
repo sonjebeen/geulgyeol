@@ -1,5 +1,11 @@
 # 글결 (GeulGyeol)
 
+## Live Demo
+
+**[▶ Open GeulGyeol](https://geulgyeol-six.vercel.app/)**
+
+No installation required. 브라우저에서 바로 한글 손글씨 연습을 시작할 수 있습니다.
+
 글결은 같은 한글 문장을 세 번 쓸 때 생기는 움직임 차이를 비교해, 사용자의 필체 개성은 보존하고 가장 불안정한 습관 하나만 교정하는 웹 기반 손글씨 코치입니다.
 
 ## 주요 기능
