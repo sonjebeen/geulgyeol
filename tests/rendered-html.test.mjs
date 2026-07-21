@@ -30,7 +30,8 @@ test("server-renders the GeulGyeol handwriting coach", async () => {
   assert.match(html, /Switch language to Korean/);
   assert.match(html, /I write slowly today, too/);
   assert.match(html, /favicon\.png/);
-  assert.match(html, /Apple Pencil/);
+  assert.match(html, /Touch &amp; Pencil ready/);
+  assert.doesNotMatch(html, /Apple Pencil/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 

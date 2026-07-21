@@ -2190,7 +2190,7 @@ export default function Home() {
         <div className="topbar-actions">
           <div className="device-note">
             <span className="live-dot" />
-            {inputMode === "pen" ? tr("Apple Pencil detected", "Apple Pencil 감지됨") : inputMode === "touch" ? tr("Touch detected", "손가락 입력 감지됨") : tr("Touch & Apple Pencil ready", "손가락 · Apple Pencil 모두 가능")}
+            {inputMode === "pen" ? tr("Pencil detected", "펜 입력 감지됨") : inputMode === "touch" ? tr("Touch detected", "손가락 입력 감지됨") : tr("Touch & Pencil ready", "손가락 · 펜 모두 가능")}
           </div>
           <button
             className="language-toggle"
