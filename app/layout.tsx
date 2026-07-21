@@ -15,6 +15,11 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     title: "GeulGyeol · Korean Hangul Handwriting Coach",
     description: "Practice Korean handwriting three times, find one habit to improve, and keep the style that feels like you.",
+    icons: {
+      icon: [{ url: "/favicon.png", type: "image/png" }],
+      shortcut: "/favicon.png",
+      apple: "/favicon.png",
+    },
     openGraph: {
       title: "GeulGyeol · Korean Hangul Handwriting Coach",
       description: "Write Korean three times. Improve one handwriting habit.",

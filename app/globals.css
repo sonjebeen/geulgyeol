@@ -42,7 +42,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 .brand { display: flex; align-items: center; gap: 11px; color: inherit; text-decoration: none; font-weight: 800; font-size: 22px; letter-spacing: -0.05em; }
 .brand small { display: block; font-size: 9px; letter-spacing: 0.15em; font-weight: 650; opacity: 0.48; text-transform: uppercase; margin-top: 1px; }
-.brand-mark { width: 39px; height: 39px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 12px 12px 12px 4px; font-size: 20px; }
+.brand-mark { width: 39px; height: 39px; flex: 0 0 auto; display: block; background: var(--ink) url("/favicon.png") center / cover no-repeat; border-radius: 11px; box-shadow: 0 5px 15px rgba(23, 35, 59, 0.16); }
 
 .device-note { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; font-weight: 650; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #56a87c; box-shadow: 0 0 0 5px rgba(86, 168, 124, 0.13); }

@@ -29,6 +29,7 @@ test("server-renders the GeulGyeol handwriting coach", async () => {
   assert.match(html, /Improve one habit/);
   assert.match(html, /Switch language to Korean/);
   assert.match(html, /I write slowly today, too/);
+  assert.match(html, /favicon\.png/);
   assert.match(html, /Apple Pencil/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
@@ -86,6 +87,17 @@ test("defaults to English and includes a Korean language switcher", async () => 
   assert.match(source, /Korean \(Hangul\) handwriting coach/);
   assert.match(source, /document\.documentElement\.lang = language/);
   assert.match(layout, /<html lang="en">/);
+});
+
+test("uses the supplied GeulGyeol image for the header logo and favicon", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  const logo = await readFile(new URL("../public/favicon.png", import.meta.url));
+  assert.match(source, /className="brand-mark" aria-hidden="true"/);
+  assert.match(styles, /url\("\/favicon\.png"\)/);
+  assert.match(layout, /icon: \[\{ url: "\/favicon\.png", type: "image\/png" \}\]/);
+  assert.ok(logo.length > 100_000);
 });
 
 test("uses fixed character cells for reliable prompt alignment", async () => {

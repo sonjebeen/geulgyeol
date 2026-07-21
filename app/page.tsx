@@ -2181,7 +2181,7 @@ export default function Home() {
     <main className="app-shell" data-language={language}>
       <header className="topbar">
         <a className="brand" href="#top" aria-label={tr("GeulGyeol home", "글결 처음으로")}>
-          <span className="brand-mark">ㄱ</span>
+          <span className="brand-mark" aria-hidden="true" />
           <span>
             {tr("GeulGyeol", "글결")}
             <small>{tr("Korean handwriting coach · 글결", "GeulGyeol · Korean handwriting")}</small>
