@@ -1,6 +1,6 @@
 # GeulGyeol (글결)
 
-> An AI-assisted Korean Hangul handwriting coach that improves one repeated habit while preserving the writer's personal style.
+> A Korean Hangul handwriting coach that improves one repeated habit while preserving the writer's personal style.
 
 ## Live Demo
 
@@ -24,13 +24,13 @@ The browser records stroke coordinates, timing, speed, rhythm, spacing, and inpu
 - One focused coaching recommendation instead of an overwhelming list of corrections
 - Before-and-after practice with an updated score
 - English-first interface with Korean localization
-- Optional GPT-5.6 vision coaching with an automatic on-device fallback
+- Browser-based coaching that works without a paid AI API
 
 ## How Codex and GPT-5.6 Were Used
 
-### Codex: Product Engineering and Iteration
+### Codex with GPT-5.6: Product Engineering and Iteration
 
-Codex was used as the primary engineering agent throughout development, with the product direction and testing feedback provided by the creator. It helped turn the original hackathon idea into a working web application by:
+Codex, using GPT-5.6 as the development model, was the primary engineering tool used to build this project. GPT-5.6 was used through the Codex development environment—not through a separately purchased API key and not as a paid service inside the deployed app. The creator provided the product direction, handwriting tests, and iterative feedback, while Codex helped turn those decisions into a working application by:
 
 - Designing the Next.js and TypeScript application structure
 - Implementing Pointer Events for touch, Pencil/stylus, and mouse input
@@ -40,22 +40,15 @@ Codex was used as the primary engineering agent throughout development, with the
 - Creating the English/Korean interface, responsive styling, logo, and favicon integration
 - Writing and running regression tests, validating production builds, and preparing the GitHub and Vercel deployment
 
-Codex was especially useful for rapid iteration: observations such as “the corrected letters are only being stretched” or “characters with batchim look awkward” were translated into concrete algorithm and interface changes, then tested in the running product.
+Codex and GPT-5.6 were especially useful for rapid iteration: observations such as “the corrected letters are only being stretched” or “characters with batchim look awkward” were translated into concrete algorithm and interface changes, then tested in the running product.
 
-### GPT-5.6: Optional Vision and Structured Coaching
+### Runtime AI Disclosure
 
-The project contains a real server-side GPT-5.6 integration in [`app/api/analyze/route.ts`](app/api/analyze/route.ts) using the OpenAI Responses API.
+No OpenAI API key was purchased or configured for the submitted public demo. The deployed application does not call GPT-5.6, and users do not consume paid OpenAI API tokens. The feedback visible in the live app is produced by the project's browser-based motion-analysis and rule-based coaching logic.
 
-When `OPENAI_API_KEY` is configured:
+The repository contains an experimental, inactive API adapter in [`app/api/analyze/route.ts`](app/api/analyze/route.ts). It was prepared as a possible future extension, but it is not an external service used by the current deployment. Without an API key, the route returns the already-generated local feedback before making any request to OpenAI. It is therefore not counted as part of the services used in this submission.
 
-1. The browser creates a comparison image containing the learner's three attempts.
-2. The server sends that image, the Korean practice sentence, and aggregated motion measurements to `gpt-5.6`.
-3. GPT-5.6 compares the visual evidence with the motion data and returns feedback through a strict JSON schema.
-4. The app presents one recurring issue, supporting evidence, a focused exercise, and an optional character-level finding.
-
-The GPT-5.6 prompt is intentionally constrained. It must preserve stable traits as personal style, avoid guessing a specific character when confidence is low, never infer stroke order from pixels alone, and avoid exaggerated or medical claims. API requests use `store: false`, and the API key remains on the server.
-
-The public demo does not expose a paid API key. If no key is available or the API request fails, GeulGyeol automatically uses its browser-based motion-analysis engine, so the complete practice flow still works for free.
+In short: **GPT-5.6 helped create the software through Codex; GPT-5.6 is not called by the live software.**
 
 ## Built With
 
@@ -64,9 +57,7 @@ The public demo does not expose a paid API key. If no key is available or the AP
 - TypeScript
 - HTML Canvas and Pointer Events
 - CSS
-- OpenAI Responses API
-- GPT-5.6
-- Codex
+- Codex with GPT-5.6 for development
 - Vercel
 - GitHub
 
@@ -79,24 +70,16 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Next.js.
-
-To enable GPT-5.6 coaching, create `.env.local` and add a server-side API key:
-
-```env
-OPENAI_API_KEY=your_key_here
-```
-
-Never place the API key in browser code or commit it to the repository.
+Open the local URL printed by Next.js. No API key is required for the submitted experience.
 
 ## Project Structure
 
 - `app/page.tsx` — handwriting canvases, input capture, three-attempt analysis, local coaching, and result UI
-- `app/api/analyze/route.ts` — optional GPT-5.6 Responses API coaching route
+- `app/api/analyze/route.ts` — inactive experimental adapter that returns local feedback when no API key is configured
 - `app/globals.css` — responsive product interface and iPad layout
 - `tests/rendered-html.test.mjs` — rendered-page regression checks
 - `vercel.json` — Vercel deployment configuration
 
 ## Privacy and Fallback Behavior
 
-Raw pointer-event history is analyzed in the browser and is not stored by this project. In local mode, no handwriting image is sent to an external AI service. In GPT-5.6 mode, a rendered comparison image and aggregated analysis data are sent to the server for that coaching request; the OpenAI request is configured with `store: false`.
+Raw pointer-event history is analyzed in the browser and is not stored by this project. The submitted Vercel deployment has no OpenAI API key, so it does not send handwriting images or analysis data to GPT-5.6 or any other external AI service.
