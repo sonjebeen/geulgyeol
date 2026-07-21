@@ -22,11 +22,13 @@ test("server-renders the GeulGyeol handwriting coach", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<html lang="ko">/i);
-  assert.match(html, /<title>글결 · 나만의 한글 필체 코치<\/title>/i);
-  assert.match(html, /세 번 쓰면/);
-  assert.match(html, /고칠 한 가지/);
-  assert.match(html, /한글 필기 입력 영역/);
+  assert.match(html, /<html lang="en">/i);
+  assert.match(html, /<title>GeulGyeol · Korean Hangul Handwriting Coach<\/title>/i);
+  assert.match(html, /Korean \(Hangul\) handwriting coach/);
+  assert.match(html, /Write it three times/);
+  assert.match(html, /Improve one habit/);
+  assert.match(html, /Switch language to Korean/);
+  assert.match(html, /I write slowly today, too/);
   assert.match(html, /Apple Pencil/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
@@ -72,7 +74,18 @@ test("includes the local character map and direct correction path", async () => 
   assert.match(source, /analyzePromptCharacters/);
   assert.match(source, /splitSampleIntoPromptCells/);
   assert.match(source, /이 글자 집중 교정/);
-  assert.match(source, /1→3회/);
+  assert.match(source, /1→3/);
+});
+
+test("defaults to English and includes a Korean language switcher", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.match(source, /useState<AppLanguage>\("en"\)/);
+  assert.match(source, /className="language-toggle"/);
+  assert.match(source, /Switch language to Korean/);
+  assert.match(source, /Korean \(Hangul\) handwriting coach/);
+  assert.match(source, /document\.documentElement\.lang = language/);
+  assert.match(layout, /<html lang="en">/);
 });
 
 test("uses fixed character cells for reliable prompt alignment", async () => {
