@@ -590,12 +590,67 @@ function drawReconstructedText(
 
 const BEAUTY_STROKE_PROFILES: Record<
   BeautyStyleKey,
-  { widthRatio: number; heightRatio: number; baseline: number; slant: number; lineWidth: number }
+  {
+    widthRatio: number;
+    heightRatio: number;
+    baseline: number;
+    slant: number;
+    lineWidth: number;
+    smoothing: number;
+    smoothingPasses: number;
+  }
 > = {
-  neat: { widthRatio: 0.68, heightRatio: 0.53, baseline: 0.78, slant: 0, lineWidth: 3.5 },
-  round: { widthRatio: 0.75, heightRatio: 0.56, baseline: 0.78, slant: -0.018, lineWidth: 4.3 },
-  flow: { widthRatio: 0.66, heightRatio: 0.55, baseline: 0.79, slant: 0.09, lineWidth: 3.2 },
+  neat: {
+    widthRatio: 0.72,
+    heightRatio: 0.54,
+    baseline: 0.78,
+    slant: 0,
+    lineWidth: 3.5,
+    smoothing: 0.62,
+    smoothingPasses: 2,
+  },
+  round: {
+    widthRatio: 0.76,
+    heightRatio: 0.57,
+    baseline: 0.78,
+    slant: -0.018,
+    lineWidth: 4.3,
+    smoothing: 0.78,
+    smoothingPasses: 2,
+  },
+  flow: {
+    widthRatio: 0.72,
+    heightRatio: 0.56,
+    baseline: 0.79,
+    slant: 0.065,
+    lineWidth: 3.2,
+    smoothing: 0.42,
+    smoothingPasses: 1,
+  },
 };
+
+function smoothStrokePoints(points: Point[], amount: number, passes: number) {
+  if (points.length < 4 || amount <= 0 || passes <= 0) return points;
+  let smoothed = points.map((point) => ({ ...point }));
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const previous = smoothed;
+    smoothed = previous.map((point, index) => {
+      if (index === 0 || index === previous.length - 1) return { ...point };
+      const before = previous[index - 1];
+      const after = previous[index + 1];
+      const neighborX = before.x * 0.25 + point.x * 0.5 + after.x * 0.25;
+      const neighborY = before.y * 0.25 + point.y * 0.5 + after.y * 0.25;
+      return {
+        ...point,
+        x: mixNumber(point.x, neighborX, amount),
+        y: mixNumber(point.y, neighborY, amount),
+      };
+    });
+  }
+
+  return smoothed;
+}
 
 function buildPersonalizedStrokeSample(
   source: Sample,
@@ -631,28 +686,37 @@ function buildPersonalizedStrokeSample(
     const cellWidth = cell.end - cell.start;
     const cellCenterX = (cell.start + cell.end) / 2;
     const isHangul = /[가-힣]/.test(cell.character);
-    const desiredWidth = isHangul
-      ? clamp(mixNumber(rawWidth, cellWidth * profile.widthRatio, correctionStrength), cellWidth * 0.34, cellWidth * 0.88)
-      : rawWidth;
-    const desiredHeight = isHangul
-      ? clamp(mixNumber(rawHeight, profile.heightRatio, correctionStrength), 0.22, 0.66)
-      : rawHeight;
-    const targetCenterX = mixNumber(rawCenterX, cellCenterX, isHangul ? correctionStrength : correctionStrength * 0.55);
-    const targetBaseline = mixNumber(maxY, profile.baseline, correctionStrength);
-    const targetTop = clamp(targetBaseline - desiredHeight, 0.08, 0.72);
+    const targetWidth = cellWidth * profile.widthRatio;
+    const targetHeight = profile.heightRatio;
+    const fitScale = isHangul ? Math.min(targetWidth / rawWidth, targetHeight / rawHeight) : 1;
+    const targetScale = clamp(fitScale, 0.84, 1.14);
+    const uniformScale = mixNumber(1, targetScale, isHangul ? correctionStrength : correctionStrength * 0.35);
+    const requestedCenterX = mixNumber(rawCenterX, cellCenterX, isHangul ? correctionStrength : correctionStrength * 0.55);
+    const requestedBaseline = mixNumber(maxY, profile.baseline, correctionStrength);
+    const targetBaseline = clamp(requestedBaseline, 0.05 + rawHeight * uniformScale, 0.94);
+    const slant = isHangul ? profile.slant * (1 - identityRatio * 0.32) : 0;
+    const slantExtent = rawHeight * uniformScale * slant;
+    const leftOffset = (minX - rawCenterX) * uniformScale + Math.min(0, slantExtent);
+    const rightOffset = (maxX - rawCenterX) * uniformScale + Math.max(0, slantExtent);
+    const horizontalMargin = cellWidth * 0.045;
+    const targetCenterX = clamp(
+      requestedCenterX,
+      cell.start + horizontalMargin - leftOffset,
+      cell.end - horizontalMargin - rightOffset,
+    );
+    const smoothingAmount = profile.smoothing * correctionStrength;
 
     cellStrokes.forEach((stroke) => {
+      const smoothedPoints = smoothStrokePoints(stroke.points, smoothingAmount, profile.smoothingPasses);
       nextStrokes.push({
         pointerType: stroke.pointerType,
-        points: stroke.points.map((point) => {
-          const unitX = (point.x - minX) / rawWidth;
-          const unitY = (point.y - minY) / rawHeight;
-          const y = targetTop + unitY * desiredHeight;
-          const slantOffset = isHangul ? (targetBaseline - y) * profile.slant * (1 - identityRatio * 0.32) : 0;
+        points: smoothedPoints.map((point) => {
+          const y = targetBaseline + (point.y - maxY) * uniformScale;
+          const slantOffset = (targetBaseline - y) * slant;
           return {
             ...point,
-            x: clamp(targetCenterX - desiredWidth / 2 + unitX * desiredWidth + slantOffset, cell.start, cell.end),
-            y: clamp(y, 0.04, 0.94),
+            x: targetCenterX + (point.x - rawCenterX) * uniformScale + slantOffset,
+            y,
           };
         }),
       });

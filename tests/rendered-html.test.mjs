@@ -96,6 +96,10 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.match(source, /drawReconstructedText/);
   assert.match(source, /buildPersonalizedStrokeSample/);
   assert.match(source, /drawPersonalizedStrokeText/);
+  assert.match(source, /smoothStrokePoints/);
+  assert.match(source, /const uniformScale = mixNumber/);
+  assert.doesNotMatch(source, /const desiredWidth =/);
+  assert.doesNotMatch(source, /const desiredHeight =/);
   assert.match(source, /correctionStrength = mixNumber/);
   assert.match(source, /ReconstructedTextCanvas/);
   assert.match(source, /PROMPT_GRID_END - PROMPT_GRID_START/);
