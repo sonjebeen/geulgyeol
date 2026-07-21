@@ -94,10 +94,14 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.match(source, /둥근 온기체/);
   assert.match(source, /가벼운 흐름체/);
   assert.match(source, /drawReconstructedText/);
+  assert.match(source, /buildPersonalizedStrokeSample/);
+  assert.match(source, /drawPersonalizedStrokeText/);
+  assert.match(source, /correctionStrength = mixNumber/);
   assert.match(source, /ReconstructedTextCanvas/);
   assert.match(source, /PROMPT_GRID_END - PROMPT_GRID_START/);
   assert.match(source, /scrollIntoView\(\{ behavior: "smooth"/);
-  assert.match(source, /정확한 자모 구조/);
+  assert.match(source, /내 실제 획 유지/);
+  assert.match(source, /내 실제 획 정돈/);
   assert.match(source, /API 비용 0원/);
   assert.match(source, /min="40"/);
   assert.match(source, /scoreAgainstReconstructedText/);

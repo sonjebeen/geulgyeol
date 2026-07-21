@@ -119,24 +119,24 @@ const BEAUTY_STYLES: Record<
   neat: {
     name: "단정한 정리체",
     english: "NEAT",
-    description: "알아보기 쉬운 한글 골격에 내 글씨의 크기와 간격을 담아요.",
-    changes: ["정확한 자모 구조", "고른 기준선", "단정한 간격"],
+    description: "내가 쓴 획은 그대로 두고 크기와 기준선만 단정하게 맞춰요.",
+    changes: ["내 실제 획 유지", "고른 기준선", "단정한 간격"],
     mark: "가",
     fontFamily: "Gowun Dodum",
   },
   round: {
     name: "둥근 온기체",
     english: "ROUND",
-    description: "정확한 글자 모양을 유지하면서 둥글고 편안한 인상을 더해요.",
-    changes: ["정확한 자모 구조", "둥근 모서리", "넉넉한 너비"],
+    description: "내 획의 생김새를 살리면서 너비와 여백을 편안하게 정돈해요.",
+    changes: ["내 실제 획 유지", "부드러운 비율", "넉넉한 너비"],
     mark: "동",
     fontFamily: "Jua",
   },
   flow: {
     name: "가벼운 흐름체",
     english: "FLOW",
-    description: "읽을 수 있는 한글 골격에 펜으로 쓴 듯한 가벼운 리듬을 더해요.",
-    changes: ["정확한 자모 구조", "손글씨 질감", "가벼운 리듬"],
+    description: "내 획의 빠른 흐름을 유지하면서 기울기와 간격을 가볍게 맞춰요.",
+    changes: ["내 실제 획 유지", "원래 획 흐름", "가벼운 기울기"],
     mark: "결",
     fontFamily: "Nanum Pen Script",
   },
@@ -216,6 +216,10 @@ const CHARACTER_ISSUE_COPY: Record<
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function mixNumber(from: number, to: number, amount: number) {
+  return from + (to - from) * amount;
 }
 
 function mean(values: number[]) {
@@ -584,6 +588,101 @@ function drawReconstructedText(
   ctx.restore();
 }
 
+const BEAUTY_STROKE_PROFILES: Record<
+  BeautyStyleKey,
+  { widthRatio: number; heightRatio: number; baseline: number; slant: number; lineWidth: number }
+> = {
+  neat: { widthRatio: 0.68, heightRatio: 0.53, baseline: 0.78, slant: 0, lineWidth: 3.5 },
+  round: { widthRatio: 0.75, heightRatio: 0.56, baseline: 0.78, slant: -0.018, lineWidth: 4.3 },
+  flow: { widthRatio: 0.66, heightRatio: 0.55, baseline: 0.79, slant: 0.09, lineWidth: 3.2 },
+};
+
+function buildPersonalizedStrokeSample(
+  source: Sample,
+  prompt: string,
+  styleKey: BeautyStyleKey,
+  identity: number,
+): Sample {
+  const profile = BEAUTY_STROKE_PROFILES[styleKey];
+  const identityRatio = clamp((identity - 40) / 50, 0, 1);
+  const correctionStrength = mixNumber(0.82, 0.28, identityRatio);
+  const cells = getPromptCellLayout(prompt);
+  const nextStrokes: Stroke[] = [];
+
+  cells.forEach((cell) => {
+    if (/\s/.test(cell.character)) return;
+    const cellStrokes = source.strokes.filter((stroke) => {
+      if (!stroke.points.length) return false;
+      const strokeCenter = mean(stroke.points.map((point) => point.x));
+      return strokeCenter >= cell.start && strokeCenter < cell.end;
+    });
+    const points = cellStrokes.flatMap((stroke) => stroke.points);
+    if (!points.length) return;
+
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const rawWidth = Math.max(maxX - minX, 0.006);
+    const rawHeight = Math.max(maxY - minY, 0.012);
+    const rawCenterX = (minX + maxX) / 2;
+    const cellWidth = cell.end - cell.start;
+    const cellCenterX = (cell.start + cell.end) / 2;
+    const isHangul = /[가-힣]/.test(cell.character);
+    const desiredWidth = isHangul
+      ? clamp(mixNumber(rawWidth, cellWidth * profile.widthRatio, correctionStrength), cellWidth * 0.34, cellWidth * 0.88)
+      : rawWidth;
+    const desiredHeight = isHangul
+      ? clamp(mixNumber(rawHeight, profile.heightRatio, correctionStrength), 0.22, 0.66)
+      : rawHeight;
+    const targetCenterX = mixNumber(rawCenterX, cellCenterX, isHangul ? correctionStrength : correctionStrength * 0.55);
+    const targetBaseline = mixNumber(maxY, profile.baseline, correctionStrength);
+    const targetTop = clamp(targetBaseline - desiredHeight, 0.08, 0.72);
+
+    cellStrokes.forEach((stroke) => {
+      nextStrokes.push({
+        pointerType: stroke.pointerType,
+        points: stroke.points.map((point) => {
+          const unitX = (point.x - minX) / rawWidth;
+          const unitY = (point.y - minY) / rawHeight;
+          const y = targetTop + unitY * desiredHeight;
+          const slantOffset = isHangul ? (targetBaseline - y) * profile.slant * (1 - identityRatio * 0.32) : 0;
+          return {
+            ...point,
+            x: clamp(targetCenterX - desiredWidth / 2 + unitX * desiredWidth + slantOffset, cell.start, cell.end),
+            y: clamp(y, 0.04, 0.94),
+          };
+        }),
+      });
+    });
+  });
+
+  return { pointerType: source.pointerType, strokes: nextStrokes };
+}
+
+function drawPersonalizedStrokeText(
+  ctx: CanvasRenderingContext2D,
+  source: Sample,
+  prompt: string,
+  width: number,
+  height: number,
+  styleKey: BeautyStyleKey,
+  identity: number,
+  options?: { color?: string; alpha?: number },
+) {
+  const personalized = buildPersonalizedStrokeSample(source, prompt, styleKey, identity);
+  personalized.strokes.forEach((stroke) =>
+    drawStroke(ctx, stroke, width, height, {
+      color: options?.color ?? "#ed735f",
+      alpha: options?.alpha ?? 1,
+      lineWidth: BEAUTY_STROKE_PROFILES[styleKey].lineWidth,
+    }),
+  );
+  return personalized;
+}
+
 function maskCoverage(source: Uint8ClampedArray, target: Uint8ClampedArray, width: number, height: number, radius: number) {
   let inkCount = 0;
   let matchedCount = 0;
@@ -621,7 +720,19 @@ function scoreAgainstReconstructedText(sample: Sample, source: Sample, prompt: s
   const targetContext = targetCanvas.getContext("2d");
   const sampleContext = sampleCanvas.getContext("2d");
   if (!targetContext || !sampleContext) return 38;
-  drawReconstructedText(targetContext, source, prompt, width, height, styleKey, identity, { color: "#000" });
+  const personalized = drawPersonalizedStrokeText(
+    targetContext,
+    source,
+    prompt,
+    width,
+    height,
+    styleKey,
+    identity,
+    { color: "#000" },
+  );
+  if (!personalized.strokes.length) {
+    drawReconstructedText(targetContext, source, prompt, width, height, styleKey, identity, { color: "#000" });
+  }
   sample.strokes.forEach((stroke) =>
     drawStroke(sampleContext, stroke, width, height, { color: "#000", lineWidth: 2.8 }),
   );
@@ -1129,7 +1240,19 @@ function ReconstructedTextCanvas({
         drawStroke(ctx, stroke, rect.width, rect.height, { color: "#8d8f8b", alpha: 0.18, lineWidth: 3.8 }),
       );
     }
-    drawReconstructedText(ctx, source, prompt, rect.width, rect.height, styleKey, identity, { color, alpha });
+    const personalized = drawPersonalizedStrokeText(
+      ctx,
+      source,
+      prompt,
+      rect.width,
+      rect.height,
+      styleKey,
+      identity,
+      { color, alpha },
+    );
+    if (!personalized.strokes.length) {
+      drawReconstructedText(ctx, source, prompt, rect.width, rect.height, styleKey, identity, { color, alpha });
+    }
   }, [alpha, color, identity, prompt, source, styleKey, underlay]);
 
   useEffect(() => {
@@ -1751,15 +1874,15 @@ export default function Home() {
           <div className="beauty-studio-heading">
             <div>
               <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
-              <h2>읽을 수 있는 ‘예쁜 내 글씨’를 만들었어요</h2>
-              <p>획을 억지로 변형하지 않고, 연습 문장의 정확한 한글 골격에 내 글씨의 크기·기울기·간격 특징을 섞었어요.</p>
+              <h2>내가 쓴 획을 살린 ‘예쁜 내 글씨’예요</h2>
+              <p>고정 폰트로 바꾸지 않고, 각 칸에서 내가 실제로 쓴 획의 모양을 가져와 크기·기준선·간격만 정돈했어요.</p>
             </div>
             <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
           </div>
 
           <div className="recognized-text-status">
             <span aria-hidden="true">✓</span>
-            <div><strong>문장 확인 완료</strong><p>글씨 모양을 추측하지 않고, 처음 제시한 연습 문장을 그대로 재구성해 글자가 깨지지 않아요.</p></div>
+            <div><strong>내 필체 획 추출 완료</strong><p>각 글자 칸의 실제 획을 그대로 가져왔어요. 글자 모양은 내 것이고 정렬만 교정해요.</p></div>
             <b>{prompt}</b>
             <small>API 비용 0원 · 이미지 전송 없음</small>
           </div>
@@ -1767,7 +1890,7 @@ export default function Home() {
           <div className="beauty-style-section">
             <div className="beauty-section-title">
               <span>1. 원하는 느낌 선택</span>
-              <small>세 스타일 모두 정확한 한글 자모 구조를 유지해요</small>
+              <small>세 스타일 모두 내가 실제로 쓴 획을 사용해요</small>
             </div>
             <div className="beauty-style-grid">
               {(Object.entries(BEAUTY_STYLES) as [BeautyStyleKey, (typeof BEAUTY_STYLES)[BeautyStyleKey]][]).map(([key, style]) => (
@@ -1791,7 +1914,7 @@ export default function Home() {
           <div className="beauty-identity-control">
             <div>
               <span>2. 내 글씨다움</span>
-              <strong>{beautyIdentity}% 반영 · {beautyIdentity <= 55 ? "골격 우선" : beautyIdentity <= 70 ? "균형 조합" : "내 특징 우선"}</strong>
+              <strong>원본 획 {beautyIdentity}% 유지 · {beautyIdentity <= 55 ? "정돈 우선" : beautyIdentity <= 70 ? "균형 조합" : "내 특징 우선"}</strong>
             </div>
             <input
               type="range"
@@ -1806,7 +1929,7 @@ export default function Home() {
               }}
               style={{ "--identity": `${((beautyIdentity - 40) / 50) * 100}%` } as React.CSSProperties}
             />
-            <div className="beauty-identity-labels"><span>정확한 골격 우선</span><span>내 필체 특징 우선</span></div>
+            <div className="beauty-identity-labels"><span>크기·간격 정돈 강하게</span><span>내 원래 획 그대로</span></div>
           </div>
 
           <div className="beauty-preview-grid">
@@ -1816,9 +1939,9 @@ export default function Home() {
                 <SampleCanvas sample={samples[2]} ariaLabel="사용자가 쓴 원본 글씨" />
               </div>
             </div>
-            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>GLYPH<br />REBUILD</b></div>
+            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>MY STROKE<br />REFINE</b></div>
             <div className="beauty-preview-card after">
-              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">한글 골격 재구성</em></div>
+              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">내 실제 획 정돈</em></div>
               <div className="beauty-preview-paper">
                 <ReconstructedTextCanvas
                   source={beautySourceSample}
@@ -1836,7 +1959,7 @@ export default function Home() {
           <div className="beauty-change-row">
             <span>이번 보정</span>
             {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
-            <small>회색 선은 원본, 산호색 글자는 정확한 문장 골격이에요</small>
+            <small>회색 선은 원본, 산호색 선은 같은 획을 크기·기준선·간격만 정돈한 결과예요</small>
           </div>
 
           {beautyPracticeScore !== null && (
