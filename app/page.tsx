@@ -76,6 +76,17 @@ type Feedback = {
 
 type BeautyStyleKey = "neat" | "round" | "flow";
 
+type HangulComponentKey = "initial" | "medial" | "final";
+
+type HangulStructure = {
+  character: string;
+  initial: string;
+  medial: string;
+  final: string;
+  medialIndex: number;
+  layout: "vertical" | "horizontal" | "mixed";
+};
+
 type CharacterIssueKey = "size" | "baseline" | "spacing" | "speed" | "stroke";
 
 type CharacterCellMetric = {
@@ -112,6 +123,33 @@ const PROMPTS = [
 const PROMPT_GRID_START = 0.025;
 const PROMPT_GRID_END = 0.975;
 
+const HANGUL_INITIALS = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+const HANGUL_MEDIALS = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅘ", "ㅙ", "ㅚ", "ㅛ", "ㅜ", "ㅝ", "ㅞ", "ㅟ", "ㅠ", "ㅡ", "ㅢ", "ㅣ"];
+const HANGUL_FINALS = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+const HANGUL_HORIZONTAL_MEDIALS = new Set([8, 12, 13, 17, 18]);
+const HANGUL_MIXED_MEDIALS = new Set([9, 10, 11, 14, 15, 16, 19]);
+
+function decomposeHangulCharacter(character: string): HangulStructure | null {
+  const codePoint = character.codePointAt(0);
+  if (codePoint === undefined || codePoint < 0xac00 || codePoint > 0xd7a3) return null;
+  const syllableIndex = codePoint - 0xac00;
+  const initialIndex = Math.floor(syllableIndex / 588);
+  const medialIndex = Math.floor((syllableIndex % 588) / 28);
+  const finalIndex = syllableIndex % 28;
+  return {
+    character,
+    initial: HANGUL_INITIALS[initialIndex],
+    medial: HANGUL_MEDIALS[medialIndex],
+    final: HANGUL_FINALS[finalIndex],
+    medialIndex,
+    layout: HANGUL_MIXED_MEDIALS.has(medialIndex)
+      ? "mixed"
+      : HANGUL_HORIZONTAL_MEDIALS.has(medialIndex)
+        ? "horizontal"
+        : "vertical",
+  };
+}
+
 const BEAUTY_STYLES: Record<
   BeautyStyleKey,
   { name: string; english: string; description: string; changes: string[]; mark: string; fontFamily: string }
@@ -119,24 +157,24 @@ const BEAUTY_STYLES: Record<
   neat: {
     name: "단정한 정리체",
     english: "NEAT",
-    description: "내가 쓴 획은 그대로 두고 크기와 기준선만 단정하게 맞춰요.",
-    changes: ["내 실제 획 유지", "고른 기준선", "단정한 간격"],
+    description: "내가 쓴 획은 그대로 두고 자모 간격과 기준선을 단정하게 맞춰요.",
+    changes: ["획 비율 그대로", "자모 간격 정돈", "고른 기준선"],
     mark: "가",
     fontFamily: "Gowun Dodum",
   },
   round: {
     name: "둥근 온기체",
     english: "ROUND",
-    description: "내 획의 생김새를 살리면서 너비와 여백을 편안하게 정돈해요.",
-    changes: ["내 실제 획 유지", "부드러운 비율", "넉넉한 너비"],
+    description: "내 획의 생김새를 살리면서 자모 사이 여백과 흔들림을 부드럽게 정돈해요.",
+    changes: ["획 비율 그대로", "부드러운 곡선", "편안한 자모 여백"],
     mark: "동",
     fontFamily: "Jua",
   },
   flow: {
     name: "가벼운 흐름체",
     english: "FLOW",
-    description: "내 획의 빠른 흐름을 유지하면서 기울기와 간격을 가볍게 맞춰요.",
-    changes: ["내 실제 획 유지", "원래 획 흐름", "가벼운 기울기"],
+    description: "내 획의 빠른 흐름을 유지하면서 자모 배치와 기울기를 가볍게 맞춰요.",
+    changes: ["획 비율 그대로", "자모 배치 정돈", "가벼운 기울기"],
     mark: "결",
     fontFamily: "Nanum Pen Script",
   },
@@ -652,6 +690,95 @@ function smoothStrokePoints(points: Point[], amount: number, passes: number) {
   return smoothed;
 }
 
+function classifyHangulStroke(
+  stroke: Stroke,
+  bounds: { minX: number; minY: number; width: number; height: number },
+  structure: HangulStructure,
+): HangulComponentKey {
+  const centerX = mean(stroke.points.map((point) => point.x));
+  const centerY = mean(stroke.points.map((point) => point.y));
+  const unitX = clamp((centerX - bounds.minX) / bounds.width, 0, 1);
+  const unitY = clamp((centerY - bounds.minY) / bounds.height, 0, 1);
+
+  if (structure.final) {
+    const finalBoundary = structure.layout === "horizontal" ? 0.73 : 0.69;
+    if (unitY >= finalBoundary) return "final";
+  }
+  if (structure.layout === "vertical") return unitX < 0.5 ? "initial" : "medial";
+  if (structure.layout === "horizontal") return unitY < 0.47 ? "initial" : "medial";
+  return unitX < 0.47 && unitY < 0.64 ? "initial" : "medial";
+}
+
+function getHangulComponentAnchor(
+  component: HangulComponentKey,
+  structure: HangulStructure,
+): { x: number; y: number } {
+  const hasFinal = Boolean(structure.final);
+  if (component === "final") return { x: 0.5, y: 0.84 };
+
+  if (structure.layout === "vertical") {
+    return component === "initial"
+      ? { x: 0.28, y: hasFinal ? 0.35 : 0.49 }
+      : { x: 0.73, y: hasFinal ? 0.37 : 0.5 };
+  }
+  if (structure.layout === "horizontal") {
+    return component === "initial"
+      ? { x: 0.5, y: hasFinal ? 0.23 : 0.27 }
+      : { x: 0.5, y: hasFinal ? 0.55 : 0.72 };
+  }
+  return component === "initial"
+    ? { x: 0.29, y: hasFinal ? 0.32 : 0.39 }
+    : { x: 0.67, y: hasFinal ? 0.48 : 0.58 };
+}
+
+function buildHangulComponentOffsets(
+  cellStrokes: Stroke[],
+  structure: HangulStructure | null,
+  bounds: { minX: number; minY: number; width: number; height: number; centerX: number; maxY: number },
+  transform: {
+    cellWidth: number;
+    centerX: number;
+    baseline: number;
+    scale: number;
+    slant: number;
+    strength: number;
+  },
+) {
+  const components = new Map<Stroke, HangulComponentKey>();
+  const offsets = new Map<HangulComponentKey, { x: number; y: number }>();
+  if (!structure) return { components, offsets };
+
+  cellStrokes.forEach((stroke) => {
+    if (!stroke.points.length) return;
+    components.set(stroke, classifyHangulStroke(stroke, bounds, structure));
+  });
+
+  (["initial", "medial", "final"] as HangulComponentKey[]).forEach((component) => {
+    if (component === "final" && !structure.final) return;
+    const componentStrokes = cellStrokes.filter((stroke) => components.get(stroke) === component);
+    const componentPoints = componentStrokes.flatMap((stroke) => stroke.points);
+    if (!componentPoints.length) return;
+    const rawComponentX = mean(componentPoints.map((point) => point.x));
+    const rawComponentY = mean(componentPoints.map((point) => point.y));
+    const currentY = transform.baseline + (rawComponentY - bounds.maxY) * transform.scale;
+    const currentX =
+      transform.centerX +
+      (rawComponentX - bounds.centerX) * transform.scale +
+      (transform.baseline - currentY) * transform.slant;
+    const anchor = getHangulComponentAnchor(component, structure);
+    const glyphWidth = bounds.width * transform.scale;
+    const glyphHeight = bounds.height * transform.scale;
+    const targetX = transform.centerX + (anchor.x - 0.5) * glyphWidth;
+    const targetY = transform.baseline - glyphHeight + anchor.y * glyphHeight;
+    offsets.set(component, {
+      x: clamp((targetX - currentX) * transform.strength, -transform.cellWidth * 0.075, transform.cellWidth * 0.075),
+      y: clamp((targetY - currentY) * transform.strength, -0.042, 0.042),
+    });
+  });
+
+  return { components, offsets };
+}
+
 function buildPersonalizedStrokeSample(
   source: Sample,
   prompt: string,
@@ -705,9 +832,23 @@ function buildPersonalizedStrokeSample(
       cell.end - horizontalMargin - rightOffset,
     );
     const smoothingAmount = profile.smoothing * correctionStrength;
+    const structureCorrection = buildHangulComponentOffsets(
+      cellStrokes,
+      decomposeHangulCharacter(cell.character),
+      { minX, minY, width: rawWidth, height: rawHeight, centerX: rawCenterX, maxY },
+      {
+        cellWidth,
+        centerX: targetCenterX,
+        baseline: targetBaseline,
+        scale: uniformScale,
+        slant,
+        strength: correctionStrength * 0.72,
+      },
+    );
 
     cellStrokes.forEach((stroke) => {
       const smoothedPoints = smoothStrokePoints(stroke.points, smoothingAmount, profile.smoothingPasses);
+      const componentOffset = structureCorrection.offsets.get(structureCorrection.components.get(stroke) ?? "initial") ?? { x: 0, y: 0 };
       nextStrokes.push({
         pointerType: stroke.pointerType,
         points: smoothedPoints.map((point) => {
@@ -715,8 +856,8 @@ function buildPersonalizedStrokeSample(
           const slantOffset = (targetBaseline - y) * slant;
           return {
             ...point,
-            x: targetCenterX + (point.x - rawCenterX) * uniformScale + slantOffset,
-            y,
+            x: targetCenterX + (point.x - rawCenterX) * uniformScale + slantOffset + componentOffset.x,
+            y: y + componentOffset.y,
           };
         }),
       });
@@ -1335,6 +1476,61 @@ function ReconstructedTextCanvas({
   return <canvas ref={canvasRef} className={className} aria-label={ariaLabel} />;
 }
 
+function BeautyComparisonSlider({
+  source,
+  prompt,
+  styleKey,
+  identity,
+}: {
+  source: Sample;
+  prompt: string;
+  styleKey: BeautyStyleKey;
+  identity: number;
+}) {
+  const [position, setPosition] = useState(52);
+
+  return (
+    <div className="beauty-comparison">
+      <div className="beauty-comparison-heading">
+        <div><span>BEFORE</span><strong>내가 쓴 원본</strong></div>
+        <p>가운데 손잡이를 움직여 비교하세요</p>
+        <div><span>AFTER</span><strong>{BEAUTY_STYLES[styleKey].name}</strong></div>
+      </div>
+      <div className="beauty-comparison-stage" style={{ "--compare-position": `${position}%` } as React.CSSProperties}>
+        <div className="beauty-comparison-layer original">
+          <SampleCanvas sample={source} ariaLabel="사용자가 쓴 원본 글씨" />
+        </div>
+        <div
+          className="beauty-comparison-layer corrected"
+          style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}
+        >
+          <ReconstructedTextCanvas
+            source={source}
+            prompt={prompt}
+            styleKey={styleKey}
+            identity={identity}
+            color="#ed735f"
+            ariaLabel={`${BEAUTY_STYLES[styleKey].name}로 자모 구조까지 교정된 글씨`}
+          />
+        </div>
+        <div className="beauty-comparison-divider" aria-hidden="true"><span>↔</span></div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={position}
+          onChange={(event) => setPosition(Number(event.target.value))}
+          aria-label="원본과 교정본 비교 위치"
+        />
+      </div>
+      <div className="beauty-comparison-legend" aria-hidden="true">
+        <span><i />원본 획</span><span><i />자모 구조 교정</span>
+      </div>
+    </div>
+  );
+}
+
 function StrokeThumbnail({ sample, label }: { sample: Sample; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -1480,6 +1676,10 @@ export default function Home() {
     [characterSamples, characterSummary],
   );
   const beautySourceSample = samples[2] ?? null;
+  const beautyStructure = useMemo(
+    () => Array.from(prompt).map(decomposeHangulCharacter).find((structure) => structure !== null) ?? null,
+    [prompt],
+  );
   const characterDiagnoses = useMemo(
     () => analyzePromptCharacters(samples, prompt),
     [samples, prompt],
@@ -1939,17 +2139,33 @@ export default function Home() {
             <div>
               <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
               <h2>내가 쓴 획을 살린 ‘예쁜 내 글씨’예요</h2>
-              <p>고정 폰트로 바꾸지 않고, 각 칸에서 내가 실제로 쓴 획의 모양을 가져와 크기·기준선·간격만 정돈했어요.</p>
+              <p>고정 폰트로 바꾸지 않고, 내가 쓴 획의 비율을 유지한 채 초성·중성·종성의 배치와 기준선을 정돈했어요.</p>
             </div>
             <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
           </div>
 
           <div className="recognized-text-status">
             <span aria-hidden="true">✓</span>
-            <div><strong>내 필체 획 추출 완료</strong><p>각 글자 칸의 실제 획을 그대로 가져왔어요. 글자 모양은 내 것이고 정렬만 교정해요.</p></div>
+            <div><strong>한글 자모 구조 분석 완료</strong><p>각 글자 칸의 실제 획을 초성·중성·종성 영역에 연결했어요. 획 모양은 그대로 유지해요.</p></div>
             <b>{prompt}</b>
             <small>API 비용 0원 · 이미지 전송 없음</small>
           </div>
+
+          {beautyStructure && (
+            <div className="hangul-structure-strip">
+              <div className="hangul-structure-example" aria-label={`${beautyStructure.character}의 자모 구조`}>
+                <span><strong>{beautyStructure.initial}</strong><small>초성</small></span>
+                <i aria-hidden="true">+</i>
+                <span><strong>{beautyStructure.medial}</strong><small>중성</small></span>
+                {beautyStructure.final && <i aria-hidden="true">+</i>}
+                {beautyStructure.final && <span><strong>{beautyStructure.final}</strong><small>종성</small></span>}
+                <b aria-hidden="true">→</b>
+                <em>{beautyStructure.character}</em>
+              </div>
+              <p><strong>자모 구조 보정</strong> 획 묶음을 통째로 이동해 자음·모음·받침 사이의 균형을 맞춰요.</p>
+              <span className="structure-safe-badge">늘이기 없음</span>
+            </div>
+          )}
 
           <div className="beauty-style-section">
             <div className="beauty-section-title">
@@ -1993,37 +2209,20 @@ export default function Home() {
               }}
               style={{ "--identity": `${((beautyIdentity - 40) / 50) * 100}%` } as React.CSSProperties}
             />
-            <div className="beauty-identity-labels"><span>크기·간격 정돈 강하게</span><span>내 원래 획 그대로</span></div>
+            <div className="beauty-identity-labels"><span>자모 배치·기준선 정돈 강하게</span><span>내 원래 획 그대로</span></div>
           </div>
 
-          <div className="beauty-preview-grid">
-            <div className="beauty-preview-card before">
-              <div><span>BEFORE</span><strong>내가 쓴 원본</strong></div>
-              <div className="beauty-preview-paper">
-                <SampleCanvas sample={samples[2]} ariaLabel="사용자가 쓴 원본 글씨" />
-              </div>
-            </div>
-            <div className="beauty-preview-arrow" aria-hidden="true"><span>✦</span><b>MY STROKE<br />REFINE</b></div>
-            <div className="beauty-preview-card after">
-              <div><span>AFTER</span><strong>{BEAUTY_STYLES[beautyStyle].name}</strong><em className="beauty-distance-badge">내 실제 획 정돈</em></div>
-              <div className="beauty-preview-paper">
-                <ReconstructedTextCanvas
-                  source={beautySourceSample}
-                  prompt={prompt}
-                  styleKey={beautyStyle}
-                  identity={beautyIdentity}
-                  underlay
-                  color="#ed735f"
-                  ariaLabel={`${BEAUTY_STYLES[beautyStyle].name}로 교정된 글씨`}
-                />
-              </div>
-            </div>
-          </div>
+          <BeautyComparisonSlider
+            source={beautySourceSample}
+            prompt={prompt}
+            styleKey={beautyStyle}
+            identity={beautyIdentity}
+          />
 
           <div className="beauty-change-row">
             <span>이번 보정</span>
             {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
-            <small>회색 선은 원본, 산호색 선은 같은 획을 크기·기준선·간격만 정돈한 결과예요</small>
+            <small>비교 손잡이를 움직여 원본 획과 자모 구조가 정돈된 결과를 바로 확인하세요</small>
           </div>
 
           {beautyPracticeScore !== null && (

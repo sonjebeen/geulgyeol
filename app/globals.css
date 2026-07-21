@@ -205,6 +205,16 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .recognized-text-status p { margin: 3px 0 0; color: #5c7165; font-size: 8px; line-height: 1.5; word-break: keep-all; }
 .recognized-text-status b { padding: 9px 12px; border-radius: 10px; background: rgba(255, 254, 250, 0.78); font-family: "Gowun Dodum", "Apple SD Gothic Neo", sans-serif; font-size: 12px; white-space: nowrap; }
 .recognized-text-status small { color: #397155; font-size: 7px; font-weight: 850; white-space: nowrap; }
+.hangul-structure-strip { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; gap: 16px; align-items: center; margin-top: 10px; padding: 13px 15px; border: 1px solid rgba(237, 115, 95, 0.24); border-radius: 15px; background: rgba(255, 246, 242, 0.82); }
+.hangul-structure-example { display: flex; align-items: center; gap: 6px; }
+.hangul-structure-example > span { min-width: 38px; padding: 6px 7px; border-radius: 10px; background: white; text-align: center; box-shadow: 0 3px 10px rgba(23, 35, 59, 0.05); }
+.hangul-structure-example strong { display: block; font-size: 17px; }
+.hangul-structure-example small { display: block; margin-top: 1px; color: var(--muted); font-size: 6px; font-weight: 850; }
+.hangul-structure-example i, .hangul-structure-example b { color: #b56b5e; font-size: 10px; font-style: normal; }
+.hangul-structure-example em { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--coral); color: white; font-size: 19px; font-style: normal; font-weight: 850; }
+.hangul-structure-strip > p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; word-break: keep-all; }
+.hangul-structure-strip > p strong { display: block; margin-bottom: 2px; color: var(--ink); font-size: 10px; }
+.structure-safe-badge { padding: 7px 9px; border-radius: 99px; background: #e4f0e9; color: #326e51; font-size: 7px; font-weight: 900; white-space: nowrap; }
 .beauty-style-section { margin-top: 30px; }
 .beauty-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .beauty-section-title span, .beauty-identity-control > div > span { font-size: 11px; font-weight: 900; }
@@ -227,6 +237,24 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .beauty-identity-control input::-webkit-slider-thumb { width: 21px; height: 21px; appearance: none; border: 5px solid var(--card); border-radius: 50%; background: var(--coral); box-shadow: 0 2px 8px rgba(23, 35, 59, 0.2); cursor: grab; }
 .beauty-identity-control input::-moz-range-thumb { width: 13px; height: 13px; border: 5px solid var(--card); border-radius: 50%; background: var(--coral); box-shadow: 0 2px 8px rgba(23, 35, 59, 0.2); cursor: grab; }
 .beauty-identity-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 8px; }
+.beauty-comparison { margin-top: 2px; }
+.beauty-comparison-heading { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: end; margin-bottom: 9px; }
+.beauty-comparison-heading > div:last-child { text-align: right; }
+.beauty-comparison-heading span { display: block; color: var(--coral); font-size: 7px; font-weight: 950; letter-spacing: 0.14em; }
+.beauty-comparison-heading strong { display: block; margin-top: 3px; font-size: 11px; }
+.beauty-comparison-heading p { margin: 0; color: var(--muted); font-size: 8px; }
+.beauty-comparison-stage { --compare-position: 52%; position: relative; height: clamp(215px, 27vw, 290px); overflow: hidden; border: 1px solid #d8d1c5; border-radius: 17px; background-color: #fffefa; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 65.8%, rgba(69, 98, 134, 0.12) 66%, transparent 66.5%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
+.beauty-comparison-stage:focus-within { border-color: var(--coral); box-shadow: 0 0 0 4px rgba(237, 115, 95, 0.13); }
+.beauty-comparison-layer { position: absolute; inset: 0; }
+.beauty-comparison-layer.corrected { z-index: 2; background-color: #fffefa; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 65.8%, rgba(237, 115, 95, 0.09) 66%, transparent 66.5%); }
+.beauty-comparison-layer canvas { width: 100%; height: 100%; display: block; }
+.beauty-comparison-divider { position: absolute; z-index: 3; top: 0; bottom: 0; left: var(--compare-position); width: 2px; transform: translateX(-1px); background: white; box-shadow: 0 0 0 1px rgba(23, 35, 59, 0.14), 0 0 14px rgba(23, 35, 59, 0.18); pointer-events: none; }
+.beauty-comparison-divider span { position: absolute; top: 50%; left: 50%; width: 38px; height: 38px; display: grid; place-items: center; transform: translate(-50%, -50%); border: 4px solid white; border-radius: 50%; background: var(--coral); color: white; font-size: 15px; font-weight: 900; box-shadow: 0 5px 15px rgba(23, 35, 59, 0.2); }
+.beauty-comparison-stage > input { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; touch-action: pan-y; }
+.beauty-comparison-legend { display: flex; justify-content: flex-end; gap: 13px; margin-top: 8px; color: var(--muted); font-size: 7px; }
+.beauty-comparison-legend span { display: flex; align-items: center; gap: 4px; }
+.beauty-comparison-legend i { width: 13px; height: 3px; border-radius: 99px; background: var(--ink); }
+.beauty-comparison-legend span:last-child i { background: var(--coral); }
 .beauty-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr); gap: 12px; align-items: center; }
 .beauty-preview-card { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255, 254, 250, 0.82); }
 .beauty-preview-card.after { border-color: rgba(237, 115, 95, 0.5); background: #fff6f2; box-shadow: 0 10px 28px rgba(237, 115, 95, 0.09); }
@@ -492,7 +520,12 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 31px
   .restart-link.inline { width: 100%; margin: 0; }
   .beauty-studio-heading { flex-direction: column; gap: 13px; }
   .beauty-studio-heading .restart-link.inline { text-align: left; }
+  .hangul-structure-strip { grid-template-columns: 1fr auto; gap: 10px; }
+  .hangul-structure-example { grid-column: 1 / -1; }
   .beauty-section-title { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .beauty-comparison-heading { grid-template-columns: 1fr 1fr; }
+  .beauty-comparison-heading p { grid-column: 1 / -1; grid-row: 2; text-align: center; }
+  .beauty-comparison-stage { height: 205px; }
   .beauty-preview-grid { grid-template-columns: 1fr; }
   .beauty-preview-arrow { grid-template-columns: auto auto; justify-content: center; align-items: center; }
   .beauty-preview-arrow span { width: 38px; height: 38px; }
