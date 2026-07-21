@@ -128,6 +128,15 @@ const HANGUL_MEDIALS = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", 
 const HANGUL_FINALS = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
 const HANGUL_HORIZONTAL_MEDIALS = new Set([8, 12, 13, 17, 18]);
 const HANGUL_MIXED_MEDIALS = new Set([9, 10, 11, 14, 15, 16, 19]);
+const HANGUL_JAMO_STROKE_COUNTS: Record<string, number> = {
+  "ㄱ": 1, "ㄲ": 2, "ㄳ": 3, "ㄴ": 1, "ㄵ": 4, "ㄶ": 4, "ㄷ": 2, "ㄸ": 4,
+  "ㄹ": 3, "ㄺ": 4, "ㄻ": 6, "ㄼ": 7, "ㄽ": 5, "ㄾ": 6, "ㄿ": 7, "ㅀ": 6,
+  "ㅁ": 3, "ㅂ": 4, "ㅃ": 8, "ㅄ": 6, "ㅅ": 2, "ㅆ": 4, "ㅇ": 1,
+  "ㅈ": 3, "ㅉ": 6, "ㅊ": 4, "ㅋ": 2, "ㅌ": 3, "ㅍ": 4, "ㅎ": 3,
+  "ㅏ": 2, "ㅐ": 3, "ㅑ": 3, "ㅒ": 4, "ㅓ": 2, "ㅔ": 3, "ㅕ": 3, "ㅖ": 4,
+  "ㅗ": 2, "ㅘ": 4, "ㅙ": 5, "ㅚ": 3, "ㅛ": 3, "ㅜ": 2, "ㅝ": 4, "ㅞ": 5,
+  "ㅟ": 3, "ㅠ": 3, "ㅡ": 1, "ㅢ": 2, "ㅣ": 1,
+};
 
 function decomposeHangulCharacter(character: string): HangulStructure | null {
   const codePoint = character.codePointAt(0);
@@ -700,13 +709,57 @@ function classifyHangulStroke(
   const unitX = clamp((centerX - bounds.minX) / bounds.width, 0, 1);
   const unitY = clamp((centerY - bounds.minY) / bounds.height, 0, 1);
 
-  if (structure.final) {
-    const finalBoundary = structure.layout === "horizontal" ? 0.73 : 0.69;
-    if (unitY >= finalBoundary) return "final";
-  }
   if (structure.layout === "vertical") return unitX < 0.5 ? "initial" : "medial";
   if (structure.layout === "horizontal") return unitY < 0.47 ? "initial" : "medial";
   return unitX < 0.47 && unitY < 0.64 ? "initial" : "medial";
+}
+
+function getStrokeCenter(stroke: Stroke) {
+  const xs = stroke.points.map((point) => point.x);
+  const ys = stroke.points.map((point) => point.y);
+  return {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+  };
+}
+
+function classifyHangulStrokes(
+  strokes: Stroke[],
+  bounds: { minX: number; minY: number; width: number; height: number },
+  structure: HangulStructure,
+) {
+  const components = new Map<Stroke, HangulComponentKey>();
+  const usableStrokes = strokes.filter((stroke) => stroke.points.length > 0);
+  const finalStrokes = new Set<Stroke>();
+
+  if (structure.final && usableStrokes.length >= 3) {
+    const initialCount = HANGUL_JAMO_STROKE_COUNTS[structure.initial] ?? 2;
+    const medialCount = HANGUL_JAMO_STROKE_COUNTS[structure.medial] ?? 2;
+    const finalCount = HANGUL_JAMO_STROKE_COUNTS[structure.final] ?? 2;
+    const expectedTotal = initialCount + medialCount + finalCount;
+    const estimatedFinalCount = clamp(
+      Math.round(usableStrokes.length * (finalCount / expectedTotal)),
+      1,
+      Math.max(1, usableStrokes.length - 2),
+    );
+    const suffix = usableStrokes.slice(-estimatedFinalCount);
+    const body = usableStrokes.slice(0, -estimatedFinalCount);
+    const suffixCenterY = mean(suffix.map((stroke) => getStrokeCenter(stroke).y));
+    const bodyCenterY = mean(body.map((stroke) => getStrokeCenter(stroke).y));
+    const isClearlyBelowBody =
+      suffixCenterY >= bounds.minY + bounds.height * 0.55 &&
+      suffixCenterY >= bodyCenterY + bounds.height * 0.075;
+
+    if (isClearlyBelowBody) suffix.forEach((stroke) => finalStrokes.add(stroke));
+  }
+
+  usableStrokes.forEach((stroke) => {
+    components.set(
+      stroke,
+      finalStrokes.has(stroke) ? "final" : classifyHangulStroke(stroke, bounds, structure),
+    );
+  });
+  return components;
 }
 
 function getHangulComponentAnchor(
@@ -714,21 +767,21 @@ function getHangulComponentAnchor(
   structure: HangulStructure,
 ): { x: number; y: number } {
   const hasFinal = Boolean(structure.final);
-  if (component === "final") return { x: 0.5, y: 0.84 };
+  if (component === "final") return { x: 0.5, y: 0.82 };
 
   if (structure.layout === "vertical") {
     return component === "initial"
-      ? { x: 0.28, y: hasFinal ? 0.35 : 0.49 }
-      : { x: 0.73, y: hasFinal ? 0.37 : 0.5 };
+      ? { x: 0.28, y: hasFinal ? 0.39 : 0.49 }
+      : { x: 0.73, y: hasFinal ? 0.4 : 0.5 };
   }
   if (structure.layout === "horizontal") {
     return component === "initial"
-      ? { x: 0.5, y: hasFinal ? 0.23 : 0.27 }
-      : { x: 0.5, y: hasFinal ? 0.55 : 0.72 };
+      ? { x: 0.5, y: 0.27 }
+      : { x: 0.5, y: hasFinal ? 0.57 : 0.72 };
   }
   return component === "initial"
-    ? { x: 0.29, y: hasFinal ? 0.32 : 0.39 }
-    : { x: 0.67, y: hasFinal ? 0.48 : 0.58 };
+    ? { x: 0.29, y: hasFinal ? 0.36 : 0.39 }
+    : { x: 0.67, y: hasFinal ? 0.5 : 0.58 };
 }
 
 function buildHangulComponentOffsets(
@@ -748,18 +801,25 @@ function buildHangulComponentOffsets(
   const offsets = new Map<HangulComponentKey, { x: number; y: number }>();
   if (!structure) return { components, offsets };
 
-  cellStrokes.forEach((stroke) => {
-    if (!stroke.points.length) return;
-    components.set(stroke, classifyHangulStroke(stroke, bounds, structure));
+  classifyHangulStrokes(cellStrokes, bounds, structure).forEach((component, stroke) => {
+    components.set(stroke, component);
   });
+  const hasDetectedFinal = Array.from(components.values()).includes("final");
+  if (structure.final && !hasDetectedFinal) return { components, offsets };
 
   (["initial", "medial", "final"] as HangulComponentKey[]).forEach((component) => {
     if (component === "final" && !structure.final) return;
     const componentStrokes = cellStrokes.filter((stroke) => components.get(stroke) === component);
     const componentPoints = componentStrokes.flatMap((stroke) => stroke.points);
     if (!componentPoints.length) return;
-    const rawComponentX = mean(componentPoints.map((point) => point.x));
-    const rawComponentY = mean(componentPoints.map((point) => point.y));
+    const componentXs = componentPoints.map((point) => point.x);
+    const componentYs = componentPoints.map((point) => point.y);
+    const componentMinX = Math.min(...componentXs);
+    const componentMaxX = Math.max(...componentXs);
+    const componentMinY = Math.min(...componentYs);
+    const componentMaxY = Math.max(...componentYs);
+    const rawComponentX = (componentMinX + componentMaxX) / 2;
+    const rawComponentY = (componentMinY + componentMaxY) / 2;
     const currentY = transform.baseline + (rawComponentY - bounds.maxY) * transform.scale;
     const currentX =
       transform.centerX +
@@ -768,11 +828,19 @@ function buildHangulComponentOffsets(
     const anchor = getHangulComponentAnchor(component, structure);
     const glyphWidth = bounds.width * transform.scale;
     const glyphHeight = bounds.height * transform.scale;
-    const targetX = transform.centerX + (anchor.x - 0.5) * glyphWidth;
-    const targetY = transform.baseline - glyphHeight + anchor.y * glyphHeight;
+    const finalHeight = (componentMaxY - componentMinY) * transform.scale;
+    const targetY = component === "final"
+      ? transform.baseline - finalHeight / 2
+      : transform.baseline - glyphHeight + anchor.y * glyphHeight;
+    const targetX = component === "final"
+      ? transform.centerX + (transform.baseline - targetY) * transform.slant
+      : transform.centerX + (anchor.x - 0.5) * glyphWidth;
+    const componentStrength = component === "final" ? transform.strength * 0.45 : transform.strength;
+    const horizontalLimit = transform.cellWidth * (component === "final" ? 0.045 : 0.075);
+    const verticalLimit = component === "final" ? 0.022 : 0.042;
     offsets.set(component, {
-      x: clamp((targetX - currentX) * transform.strength, -transform.cellWidth * 0.075, transform.cellWidth * 0.075),
-      y: clamp((targetY - currentY) * transform.strength, -0.042, 0.042),
+      x: clamp((targetX - currentX) * componentStrength, -horizontalLimit, horizontalLimit),
+      y: clamp((targetY - currentY) * componentStrength, -verticalLimit, verticalLimit),
     });
   });
 
@@ -832,9 +900,10 @@ function buildPersonalizedStrokeSample(
       cell.end - horizontalMargin - rightOffset,
     );
     const smoothingAmount = profile.smoothing * correctionStrength;
+    const hangulStructure = decomposeHangulCharacter(cell.character);
     const structureCorrection = buildHangulComponentOffsets(
       cellStrokes,
-      decomposeHangulCharacter(cell.character),
+      hangulStructure,
       { minX, minY, width: rawWidth, height: rawHeight, centerX: rawCenterX, maxY },
       {
         cellWidth,
@@ -842,7 +911,7 @@ function buildPersonalizedStrokeSample(
         baseline: targetBaseline,
         scale: uniformScale,
         slant,
-        strength: correctionStrength * 0.72,
+        strength: correctionStrength * (hangulStructure?.final ? 0.5 : 0.72),
       },
     );
 
@@ -1677,7 +1746,10 @@ export default function Home() {
   );
   const beautySourceSample = samples[2] ?? null;
   const beautyStructure = useMemo(
-    () => Array.from(prompt).map(decomposeHangulCharacter).find((structure) => structure !== null) ?? null,
+    () => {
+      const structures = Array.from(prompt).map(decomposeHangulCharacter).filter((structure) => structure !== null);
+      return structures.find((structure) => Boolean(structure.final)) ?? structures[0] ?? null;
+    },
     [prompt],
   );
   const characterDiagnoses = useMemo(
@@ -2146,7 +2218,7 @@ export default function Home() {
 
           <div className="recognized-text-status">
             <span aria-hidden="true">✓</span>
-            <div><strong>한글 자모 구조 분석 완료</strong><p>각 글자 칸의 실제 획을 초성·중성·종성 영역에 연결했어요. 획 모양은 그대로 유지해요.</p></div>
+            <div><strong>한글 자모 구조 분석 완료</strong><p>획순과 실제 위치를 함께 보고 받침을 구분해요. 확실하지 않으면 원본 배치를 그대로 유지해요.</p></div>
             <b>{prompt}</b>
             <small>API 비용 0원 · 이미지 전송 없음</small>
           </div>
@@ -2162,8 +2234,8 @@ export default function Home() {
                 <b aria-hidden="true">→</b>
                 <em>{beautyStructure.character}</em>
               </div>
-              <p><strong>자모 구조 보정</strong> 획 묶음을 통째로 이동해 자음·모음·받침 사이의 균형을 맞춰요.</p>
-              <span className="structure-safe-badge">늘이기 없음</span>
+              <p><strong>자모 구조 보정</strong> 받침의 높이는 보존하고 중심과 바닥선만 부드럽게 맞춰요.</p>
+              <span className="structure-safe-badge">늘이기 없음 · 받침 보호</span>
             </div>
           )}
 
@@ -2221,6 +2293,7 @@ export default function Home() {
 
           <div className="beauty-change-row">
             <span>이번 보정</span>
+            <b>✓ 받침 바닥선 보호</b>
             {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
             <small>비교 손잡이를 움직여 원본 획과 자모 구조가 정돈된 결과를 바로 확인하세요</small>
           </div>

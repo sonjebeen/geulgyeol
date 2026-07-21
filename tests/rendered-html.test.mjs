@@ -102,10 +102,13 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.doesNotMatch(source, /const desiredHeight =/);
   assert.match(source, /decomposeHangulCharacter/);
   assert.match(source, /classifyHangulStroke/);
+  assert.match(source, /classifyHangulStrokes/);
+  assert.match(source, /HANGUL_JAMO_STROKE_COUNTS/);
   assert.match(source, /buildHangulComponentOffsets/);
   assert.match(source, /BeautyComparisonSlider/);
   assert.match(source, /자모 구조 보정/);
   assert.match(source, /늘이기 없음/);
+  assert.match(source, /받침 바닥선 보호/);
   assert.match(source, /원본과 교정본 비교 위치/);
   assert.match(source, /correctionStrength = mixNumber/);
   assert.match(source, /ReconstructedTextCanvas/);
