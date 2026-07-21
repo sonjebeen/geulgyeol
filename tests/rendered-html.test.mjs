@@ -97,6 +97,10 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.match(source, /buildPersonalizedStrokeSample/);
   assert.match(source, /drawPersonalizedStrokeText/);
   assert.match(source, /smoothStrokePoints/);
+  assert.match(source, /getPersonalHandwritingCenterline/);
+  assert.match(source, /const personalCenterline =/);
+  assert.match(source, /const targetCenterY = clamp/);
+  assert.doesNotMatch(source, /profile\.baseline/);
   assert.match(source, /const uniformScale = mixNumber/);
   assert.doesNotMatch(source, /const desiredWidth =/);
   assert.doesNotMatch(source, /const desiredHeight =/);
@@ -115,7 +119,8 @@ test("includes personal handwriting beautification and tracing", async () => {
   assert.match(source, /PROMPT_GRID_END - PROMPT_GRID_START/);
   assert.match(source, /scrollIntoView\(\{ behavior: "smooth"/);
   assert.match(source, /획 비율 그대로/);
-  assert.match(source, /한글 자모 구조 분석 완료/);
+  assert.match(source, /내 글자 중심선 계산 완료/);
+  assert.match(source, /--personal-centerline/);
   assert.match(source, /API 비용 0원/);
   assert.match(source, /min="40"/);
   assert.match(source, /scoreAgainstReconstructedText/);

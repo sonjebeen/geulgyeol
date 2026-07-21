@@ -166,8 +166,8 @@ const BEAUTY_STYLES: Record<
   neat: {
     name: "단정한 정리체",
     english: "NEAT",
-    description: "내가 쓴 획은 그대로 두고 자모 간격과 기준선을 단정하게 맞춰요.",
-    changes: ["획 비율 그대로", "자모 간격 정돈", "고른 기준선"],
+    description: "내가 쓴 획은 그대로 두고 자모 간격과 내 글자 중심을 단정하게 맞춰요.",
+    changes: ["획 비율 그대로", "자모 간격 정돈", "개인 중심선 정렬"],
     mark: "가",
     fontFamily: "Gowun Dodum",
   },
@@ -579,6 +579,35 @@ function getPromptCellLayout(prompt: string) {
   });
 }
 
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function getPersonalHandwritingCenterline(source: Sample, prompt: string) {
+  const characterCenters = getPromptCellLayout(prompt).flatMap((cell) => {
+    if (!/[가-힣]/.test(cell.character)) return [];
+    const points = source.strokes
+      .filter((stroke) => {
+        if (!stroke.points.length) return false;
+        const strokeCenterX = mean(stroke.points.map((point) => point.x));
+        return strokeCenterX >= cell.start && strokeCenterX < cell.end;
+      })
+      .flatMap((stroke) => stroke.points);
+    if (points.length < 2) return [];
+    const ys = points.map((point) => point.y);
+    return [(Math.min(...ys) + Math.max(...ys)) / 2];
+  });
+
+  if (characterCenters.length) return clamp(median(characterCenters), 0.16, 0.84);
+  const allPoints = source.strokes.flatMap((stroke) => stroke.points);
+  if (!allPoints.length) return 0.5;
+  const ys = allPoints.map((point) => point.y);
+  return clamp((Math.min(...ys) + Math.max(...ys)) / 2, 0.16, 0.84);
+}
+
 function drawReconstructedText(
   ctx: CanvasRenderingContext2D,
   source: Sample,
@@ -640,7 +669,6 @@ const BEAUTY_STROKE_PROFILES: Record<
   {
     widthRatio: number;
     heightRatio: number;
-    baseline: number;
     slant: number;
     lineWidth: number;
     smoothing: number;
@@ -650,7 +678,6 @@ const BEAUTY_STROKE_PROFILES: Record<
   neat: {
     widthRatio: 0.72,
     heightRatio: 0.54,
-    baseline: 0.78,
     slant: 0,
     lineWidth: 3.5,
     smoothing: 0.62,
@@ -659,7 +686,6 @@ const BEAUTY_STROKE_PROFILES: Record<
   round: {
     widthRatio: 0.76,
     heightRatio: 0.57,
-    baseline: 0.78,
     slant: -0.018,
     lineWidth: 4.3,
     smoothing: 0.78,
@@ -668,7 +694,6 @@ const BEAUTY_STROKE_PROFILES: Record<
   flow: {
     widthRatio: 0.72,
     heightRatio: 0.56,
-    baseline: 0.79,
     slant: 0.065,
     lineWidth: 3.2,
     smoothing: 0.42,
@@ -787,11 +812,12 @@ function getHangulComponentAnchor(
 function buildHangulComponentOffsets(
   cellStrokes: Stroke[],
   structure: HangulStructure | null,
-  bounds: { minX: number; minY: number; width: number; height: number; centerX: number; maxY: number },
+  bounds: { minX: number; minY: number; width: number; height: number; centerX: number; centerY: number },
   transform: {
     cellWidth: number;
     centerX: number;
-    baseline: number;
+    centerY: number;
+    bottomY: number;
     scale: number;
     slant: number;
     strength: number;
@@ -820,20 +846,20 @@ function buildHangulComponentOffsets(
     const componentMaxY = Math.max(...componentYs);
     const rawComponentX = (componentMinX + componentMaxX) / 2;
     const rawComponentY = (componentMinY + componentMaxY) / 2;
-    const currentY = transform.baseline + (rawComponentY - bounds.maxY) * transform.scale;
+    const currentY = transform.centerY + (rawComponentY - bounds.centerY) * transform.scale;
     const currentX =
       transform.centerX +
       (rawComponentX - bounds.centerX) * transform.scale +
-      (transform.baseline - currentY) * transform.slant;
+      (transform.centerY - currentY) * transform.slant;
     const anchor = getHangulComponentAnchor(component, structure);
     const glyphWidth = bounds.width * transform.scale;
     const glyphHeight = bounds.height * transform.scale;
     const finalHeight = (componentMaxY - componentMinY) * transform.scale;
     const targetY = component === "final"
-      ? transform.baseline - finalHeight / 2
-      : transform.baseline - glyphHeight + anchor.y * glyphHeight;
+      ? transform.bottomY - finalHeight / 2
+      : transform.centerY - glyphHeight / 2 + anchor.y * glyphHeight;
     const targetX = component === "final"
-      ? transform.centerX + (transform.baseline - targetY) * transform.slant
+      ? transform.centerX + (transform.centerY - targetY) * transform.slant
       : transform.centerX + (anchor.x - 0.5) * glyphWidth;
     const componentStrength = component === "final" ? transform.strength * 0.45 : transform.strength;
     const horizontalLimit = transform.cellWidth * (component === "final" ? 0.045 : 0.075);
@@ -857,6 +883,7 @@ function buildPersonalizedStrokeSample(
   const identityRatio = clamp((identity - 40) / 50, 0, 1);
   const correctionStrength = mixNumber(0.82, 0.28, identityRatio);
   const cells = getPromptCellLayout(prompt);
+  const personalCenterline = getPersonalHandwritingCenterline(source, prompt);
   const nextStrokes: Stroke[] = [];
 
   cells.forEach((cell) => {
@@ -878,6 +905,7 @@ function buildPersonalizedStrokeSample(
     const rawWidth = Math.max(maxX - minX, 0.006);
     const rawHeight = Math.max(maxY - minY, 0.012);
     const rawCenterX = (minX + maxX) / 2;
+    const rawCenterY = (minY + maxY) / 2;
     const cellWidth = cell.end - cell.start;
     const cellCenterX = (cell.start + cell.end) / 2;
     const isHangul = /[가-힣]/.test(cell.character);
@@ -887,12 +915,15 @@ function buildPersonalizedStrokeSample(
     const targetScale = clamp(fitScale, 0.84, 1.14);
     const uniformScale = mixNumber(1, targetScale, isHangul ? correctionStrength : correctionStrength * 0.35);
     const requestedCenterX = mixNumber(rawCenterX, cellCenterX, isHangul ? correctionStrength : correctionStrength * 0.55);
-    const requestedBaseline = mixNumber(maxY, profile.baseline, correctionStrength);
-    const targetBaseline = clamp(requestedBaseline, 0.05 + rawHeight * uniformScale, 0.94);
+    const centerlineStrength = isHangul ? clamp(correctionStrength * 1.18, 0.34, 0.92) : 0;
+    const requestedCenterY = mixNumber(rawCenterY, personalCenterline, centerlineStrength);
+    const halfHeight = rawHeight * uniformScale / 2;
+    const targetCenterY = clamp(requestedCenterY, 0.05 + halfHeight, 0.94 - halfHeight);
+    const targetBottomY = targetCenterY + halfHeight;
     const slant = isHangul ? profile.slant * (1 - identityRatio * 0.32) : 0;
-    const slantExtent = rawHeight * uniformScale * slant;
-    const leftOffset = (minX - rawCenterX) * uniformScale + Math.min(0, slantExtent);
-    const rightOffset = (maxX - rawCenterX) * uniformScale + Math.max(0, slantExtent);
+    const halfSlantExtent = halfHeight * slant;
+    const leftOffset = (minX - rawCenterX) * uniformScale + Math.min(-halfSlantExtent, halfSlantExtent);
+    const rightOffset = (maxX - rawCenterX) * uniformScale + Math.max(-halfSlantExtent, halfSlantExtent);
     const horizontalMargin = cellWidth * 0.045;
     const targetCenterX = clamp(
       requestedCenterX,
@@ -904,11 +935,12 @@ function buildPersonalizedStrokeSample(
     const structureCorrection = buildHangulComponentOffsets(
       cellStrokes,
       hangulStructure,
-      { minX, minY, width: rawWidth, height: rawHeight, centerX: rawCenterX, maxY },
+      { minX, minY, width: rawWidth, height: rawHeight, centerX: rawCenterX, centerY: rawCenterY },
       {
         cellWidth,
         centerX: targetCenterX,
-        baseline: targetBaseline,
+        centerY: targetCenterY,
+        bottomY: targetBottomY,
         scale: uniformScale,
         slant,
         strength: correctionStrength * (hangulStructure?.final ? 0.5 : 0.72),
@@ -921,8 +953,8 @@ function buildPersonalizedStrokeSample(
       nextStrokes.push({
         pointerType: stroke.pointerType,
         points: smoothedPoints.map((point) => {
-          const y = targetBaseline + (point.y - maxY) * uniformScale;
-          const slantOffset = (targetBaseline - y) * slant;
+          const y = targetCenterY + (point.y - rawCenterY) * uniformScale;
+          const slantOffset = (targetCenterY - y) * slant;
           return {
             ...point,
             x: targetCenterX + (point.x - rawCenterX) * uniformScale + slantOffset + componentOffset.x,
@@ -1557,6 +1589,10 @@ function BeautyComparisonSlider({
   identity: number;
 }) {
   const [position, setPosition] = useState(52);
+  const personalCenterline = useMemo(
+    () => getPersonalHandwritingCenterline(source, prompt),
+    [prompt, source],
+  );
 
   return (
     <div className="beauty-comparison">
@@ -1565,7 +1601,13 @@ function BeautyComparisonSlider({
         <p>가운데 손잡이를 움직여 비교하세요</p>
         <div><span>AFTER</span><strong>{BEAUTY_STYLES[styleKey].name}</strong></div>
       </div>
-      <div className="beauty-comparison-stage" style={{ "--compare-position": `${position}%` } as React.CSSProperties}>
+      <div
+        className="beauty-comparison-stage"
+        style={{
+          "--compare-position": `${position}%`,
+          "--personal-centerline": `${personalCenterline * 100}%`,
+        } as React.CSSProperties}
+      >
         <div className="beauty-comparison-layer original">
           <SampleCanvas sample={source} ariaLabel="사용자가 쓴 원본 글씨" />
         </div>
@@ -1582,6 +1624,9 @@ function BeautyComparisonSlider({
             ariaLabel={`${BEAUTY_STYLES[styleKey].name}로 자모 구조까지 교정된 글씨`}
           />
         </div>
+        <div className="beauty-personal-centerline" aria-hidden="true">
+          <span>내 글자 중심 {Math.round(personalCenterline * 100)}%</span>
+        </div>
         <div className="beauty-comparison-divider" aria-hidden="true"><span>↔</span></div>
         <input
           type="range"
@@ -1594,7 +1639,7 @@ function BeautyComparisonSlider({
         />
       </div>
       <div className="beauty-comparison-legend" aria-hidden="true">
-        <span><i />원본 획</span><span><i />자모 구조 교정</span>
+        <span><i />원본 획</span><span><i />자모 구조 교정</span><span className="centerline"><i />내 글자 중심선</span>
       </div>
     </div>
   );
@@ -2211,14 +2256,14 @@ export default function Home() {
             <div>
               <p className="section-kicker">MY BEAUTIFUL HANDWRITING</p>
               <h2>내가 쓴 획을 살린 ‘예쁜 내 글씨’예요</h2>
-              <p>고정 폰트로 바꾸지 않고, 내가 쓴 획의 비율을 유지한 채 초성·중성·종성의 배치와 기준선을 정돈했어요.</p>
+              <p>고정 폰트나 캔버스 줄에 맞추지 않고, 이번에 쓴 글자들의 실제 가운데를 개인 중심선으로 삼아 정돈했어요.</p>
             </div>
             <button className="restart-link inline" type="button" onClick={() => setPhase("result")}>분석 결과로 돌아가기</button>
           </div>
 
           <div className="recognized-text-status">
             <span aria-hidden="true">✓</span>
-            <div><strong>한글 자모 구조 분석 완료</strong><p>획순과 실제 위치를 함께 보고 받침을 구분해요. 확실하지 않으면 원본 배치를 그대로 유지해요.</p></div>
+            <div><strong>내 글자 중심선 계산 완료</strong><p>문장을 쓸 때마다 글자 중심의 중앙값을 새로 계산해요. 획순과 위치를 함께 보고 받침도 보호해요.</p></div>
             <b>{prompt}</b>
             <small>API 비용 0원 · 이미지 전송 없음</small>
           </div>
@@ -2281,7 +2326,7 @@ export default function Home() {
               }}
               style={{ "--identity": `${((beautyIdentity - 40) / 50) * 100}%` } as React.CSSProperties}
             />
-            <div className="beauty-identity-labels"><span>자모 배치·기준선 정돈 강하게</span><span>내 원래 획 그대로</span></div>
+            <div className="beauty-identity-labels"><span>내 중심선·자모 배치 정돈 강하게</span><span>내 원래 획 그대로</span></div>
           </div>
 
           <BeautyComparisonSlider
@@ -2293,6 +2338,7 @@ export default function Home() {
 
           <div className="beauty-change-row">
             <span>이번 보정</span>
+            <b>✓ 내 글자 중심선 정렬</b>
             <b>✓ 받침 바닥선 보호</b>
             {BEAUTY_STYLES[beautyStyle].changes.map((change) => <b key={change}>✓ {change}</b>)}
             <small>비교 손잡이를 움직여 원본 획과 자모 구조가 정돈된 결과를 바로 확인하세요</small>

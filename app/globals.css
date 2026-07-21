@@ -243,11 +243,13 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .beauty-comparison-heading span { display: block; color: var(--coral); font-size: 7px; font-weight: 950; letter-spacing: 0.14em; }
 .beauty-comparison-heading strong { display: block; margin-top: 3px; font-size: 11px; }
 .beauty-comparison-heading p { margin: 0; color: var(--muted); font-size: 8px; }
-.beauty-comparison-stage { --compare-position: 52%; position: relative; height: clamp(215px, 27vw, 290px); overflow: hidden; border: 1px solid #d8d1c5; border-radius: 17px; background-color: #fffefa; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 65.8%, rgba(69, 98, 134, 0.12) 66%, transparent 66.5%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
+.beauty-comparison-stage { --compare-position: 52%; --personal-centerline: 50%; position: relative; height: clamp(215px, 27vw, 290px); overflow: hidden; border: 1px solid #d8d1c5; border-radius: 17px; background-color: #fffefa; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
 .beauty-comparison-stage:focus-within { border-color: var(--coral); box-shadow: 0 0 0 4px rgba(237, 115, 95, 0.13); }
 .beauty-comparison-layer { position: absolute; inset: 0; }
-.beauty-comparison-layer.corrected { z-index: 2; background-color: #fffefa; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 65.8%, rgba(237, 115, 95, 0.09) 66%, transparent 66.5%); }
+.beauty-comparison-layer.corrected { z-index: 1; background-color: #fffefa; }
 .beauty-comparison-layer canvas { width: 100%; height: 100%; display: block; }
+.beauty-personal-centerline { position: absolute; z-index: 2; top: var(--personal-centerline); right: 0; left: 0; border-top: 1px dashed rgba(63, 125, 91, 0.58); pointer-events: none; }
+.beauty-personal-centerline span { position: absolute; top: -7px; right: 9px; padding: 3px 6px; border-radius: 99px; background: rgba(229, 240, 234, 0.94); color: #326e51; font-size: 6px; font-weight: 900; }
 .beauty-comparison-divider { position: absolute; z-index: 3; top: 0; bottom: 0; left: var(--compare-position); width: 2px; transform: translateX(-1px); background: white; box-shadow: 0 0 0 1px rgba(23, 35, 59, 0.14), 0 0 14px rgba(23, 35, 59, 0.18); pointer-events: none; }
 .beauty-comparison-divider span { position: absolute; top: 50%; left: 50%; width: 38px; height: 38px; display: grid; place-items: center; transform: translate(-50%, -50%); border: 4px solid white; border-radius: 50%; background: var(--coral); color: white; font-size: 15px; font-weight: 900; box-shadow: 0 5px 15px rgba(23, 35, 59, 0.2); }
 .beauty-comparison-stage > input { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; touch-action: pan-y; }
@@ -255,6 +257,7 @@ button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .beauty-comparison-legend span { display: flex; align-items: center; gap: 4px; }
 .beauty-comparison-legend i { width: 13px; height: 3px; border-radius: 99px; background: var(--ink); }
 .beauty-comparison-legend span:last-child i { background: var(--coral); }
+.beauty-comparison-legend .centerline i { height: 0; border-top: 1px dashed #3f7d5b; background: transparent; }
 .beauty-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr); gap: 12px; align-items: center; }
 .beauty-preview-card { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255, 254, 250, 0.82); }
 .beauty-preview-card.after { border-color: rgba(237, 115, 95, 0.5); background: #fff6f2; box-shadow: 0 10px 28px rgba(237, 115, 95, 0.09); }
